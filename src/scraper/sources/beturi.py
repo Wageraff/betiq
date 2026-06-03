@@ -205,7 +205,7 @@ def _build_kickoff_text(raw: dict) -> str:
     tv = (raw.get("matchTime") or "").strip()
     time_part = ""
     if tv:
-        m = tv.match(r"(\d{1,2}:\d{2})")
+        m = re.search(r"(\d{1,2}:\d{2})", tv)
         if m:
             time_part = m.group(1)
     if day and time_part:
