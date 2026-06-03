@@ -64,6 +64,7 @@ async def diagnose_url(
     *,
     use_proxy: bool,
     label: str,
+    geo: Optional[str] = None,
 ) -> dict:
     result = {
         "label": label,
@@ -83,7 +84,8 @@ async def diagnose_url(
     pw = browser = None
     try:
         if use_proxy:
-            async with page_session() as (page, _):
+            async with page_session(geo=geo, verify_url=url) as (page, _):
+                result["proxy_geo"] = geo
                 return await _check_page(page, url, result, label)
         pw, browser, context, page = await _open_page_without_proxy()
         try:
@@ -135,12 +137,20 @@ async def _check_page(page, url: str, result: dict, label: str) -> dict:
 
 async def diagnose_source(source: Source) -> list[dict]:
     url = source.base_url.rstrip("/") + source.category_url
+    source_geo = (source.geo or settings.proxy_fallback_geo or "GB").upper()
     results = []
     results.append(await diagnose_url(url, use_proxy=False, label="WITHOUT PROXY"))
     if ProxyPool().has_proxies:
         if settings.require_proxy:
             ensure_proxy_configured()
-        results.append(await diagnose_url(url, use_proxy=True, label="WITH PROXY"))
+        results.append(
+            await diagnose_url(
+                url,
+                use_proxy=True,
+                label=f"WITH PROXY (area-{source_geo})",
+                geo=source_geo,
+            )
+        )
     return results
 
 

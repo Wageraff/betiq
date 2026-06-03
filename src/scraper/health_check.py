@@ -23,7 +23,12 @@ from src.scraper.utils.alerter import (
     alert_no_new_predictions,
     alert_unreachable,
 )
-from src.scraper.utils.browser import browser_lifecycle, page_session, wait_cloudflare
+from src.scraper.utils.browser import (
+    browser_lifecycle,
+    page_session,
+    scrape_geo_context,
+    wait_cloudflare,
+)
 
 log = logging.getLogger("health_check")
 
@@ -72,49 +77,50 @@ async def check_source(session: AsyncSession, source: Source) -> HealthCheckResu
             details="scraper_module not set",
         )
 
+    source_geo = (source.geo or settings.proxy_fallback_geo or "GB").upper()
+
     try:
-        async with page_session() as (page, _proxy):
-            response = await page.goto(
-                category_url,
-                wait_until="domcontentloaded",
-                timeout=settings.page_timeout,
-            )
-            status_code = response.status if response else None
-            is_accessible = status_code is not None and status_code < 400
-
-            await wait_cloudflare(page)
-            title = (await page.title()) or ""
-            h1 = await page.evaluate(
-                "() => document.querySelector('h1')?.innerText?.trim() || ''"
-            )
-            cf_blocked = "just a moment" in title.lower() or "attention required" in title.lower()
-            content = await page.content()
-            cf_mitigated = "cf-mitigated" in content
-
-            if cf_blocked:
-                details_parts.append("cloudflare_challenge")
-                await page.wait_for_timeout(10_000)
-                title = await page.title()
+        async with scrape_geo_context(source_geo):
+            async with page_session(verify_url=category_url) as (page, _proxy):
+                is_accessible = True
+                status_code = 200
+                title = (await page.title()) or ""
                 h1 = await page.evaluate(
                     "() => document.querySelector('h1')?.innerText?.trim() || ''"
                 )
+                cf_blocked = (
+                    "just a moment" in title.lower()
+                    or "attention required" in title.lower()
+                )
+                content = await page.content()
+                cf_mitigated = "cf-mitigated" in content
 
-            module = load_source_module(source.scraper_module)
-            try:
-                urls = await module.get_article_urls(page)
-                articles_found = len(urls)
-            except Exception as e:
-                details_parts.append(f"get_article_urls: {e}")
-                urls = []
+                if cf_blocked:
+                    details_parts.append("cloudflare_challenge")
+                    await page.wait_for_timeout(10_000)
+                    title = await page.title()
+                    h1 = await page.evaluate(
+                        "() => document.querySelector('h1')?.innerText?.trim() || ''"
+                    )
 
-            has_h1 = bool(h1)
-            html_structure_ok = (
-                articles_found > 0
-                and has_h1
-                and not cf_blocked
-                and not cf_mitigated
-            )
-            details_parts.append(f"title={title[:60]!r} h1={bool(h1)} urls={articles_found}")
+                module = load_source_module(source.scraper_module)
+                try:
+                    urls = await module.get_article_urls(page)
+                    articles_found = len(urls)
+                except Exception as e:
+                    details_parts.append(f"get_article_urls: {e}")
+                    urls = []
+
+                has_h1 = bool(h1)
+                html_structure_ok = (
+                    articles_found > 0
+                    and has_h1
+                    and not cf_blocked
+                    and not cf_mitigated
+                )
+                details_parts.append(
+                    f"title={title[:60]!r} h1={bool(h1)} urls={articles_found}"
+                )
 
     except Exception as e:
         details_parts.append(f"error: {e}")

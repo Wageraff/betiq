@@ -25,6 +25,7 @@ from src.scraper.utils.browser import (
     is_proxy_error,
     page_session,
     report_proxy_failure,
+    scrape_geo_context,
 )
 from src.scraper.health_check import _had_new_items_24h
 from src.scraper.utils.alerter import (
@@ -131,58 +132,61 @@ async def scrape_source(
 
     module = load_source_module(source.scraper_module)
     log.info("Scraping %s (%s)", source.name, source.scraper_module)
+    category_url = source.base_url.rstrip("/") + source.category_url
+    source_geo = (source.geo or settings.proxy_fallback_geo or "GB").upper()
 
     try:
-        async with page_session() as (page, proxy):
-            urls = await module.get_article_urls(page)
-            items_found = len(urls)
+        async with scrape_geo_context(source_geo):
+            async with page_session(verify_url=category_url) as (page, proxy):
+                urls = await module.get_article_urls(page)
+                items_found = len(urls)
 
-            max_age = settings.scrape_articles_max_age_days
-            urls = [u for u in urls if _url_within_age(u, max_age)]
+                max_age = settings.scrape_articles_max_age_days
+                urls = [u for u in urls if _url_within_age(u, max_age)]
 
-            if force:
-                await _delete_predictions_by_urls(session, urls)
-                await session.commit()
-                log.info("%s: force re-scrape for %s URLs", source.name, len(urls))
-            else:
-                existing = await _existing_urls(session, urls)
-                urls = [u for u in urls if u not in existing]
+                if force:
+                    await _delete_predictions_by_urls(session, urls)
+                    await session.commit()
+                    log.info("%s: force re-scrape for %s URLs", source.name, len(urls))
+                else:
+                    existing = await _existing_urls(session, urls)
+                    urls = [u for u in urls if u not in existing]
 
-            if limit:
-                urls = urls[:limit]
+                if limit:
+                    urls = urls[:limit]
 
-            log.info("%s: %s new URLs to parse", source.name, len(urls))
+                log.info("%s: %s new URLs to parse", source.name, len(urls))
 
-            for url in urls:
-                parsed = None
-                article_proxy = None
-                for attempt in range(2):
-                    try:
-                        async with page_session() as (article_page, article_proxy):
-                            parsed = await module.parse_prediction(article_page, url)
-                        break
-                    except Exception as e:
-                        report_proxy_failure(e, article_proxy)
-                        if attempt == 0 and is_proxy_error(e):
-                            log.warning("Proxy error, retry: %s", url)
-                            continue
-                        log.error("Failed %s: %s", url, e)
-                        break
+                for url in urls:
+                    parsed = None
+                    article_proxy = None
+                    for attempt in range(2):
+                        try:
+                            async with page_session() as (article_page, article_proxy):
+                                parsed = await module.parse_prediction(article_page, url)
+                            break
+                        except Exception as e:
+                            report_proxy_failure(e, article_proxy)
+                            if attempt == 0 and is_proxy_error(e):
+                                log.warning("Proxy error, retry: %s", url)
+                                continue
+                            log.error("Failed %s: %s", url, e)
+                            break
 
-                if parsed:
-                    if await _persist_prediction(session, source, parsed):
-                        items_new += 1
-                        await session.commit()
-                        log.info("Saved: %s", url)
-                    else:
-                        await session.rollback()
+                    if parsed:
+                        if await _persist_prediction(session, source, parsed):
+                            items_new += 1
+                            await session.commit()
+                            log.info("Saved: %s", url)
+                        else:
+                            await session.rollback()
 
-                delay = random.uniform(
-                    settings.scrape_delay_min, settings.scrape_delay_max
-                )
-                await asyncio.sleep(delay)
+                    delay = random.uniform(
+                        settings.scrape_delay_min, settings.scrape_delay_max
+                    )
+                    await asyncio.sleep(delay)
 
-        source.last_success_at = datetime.utcnow()
+            source.last_success_at = datetime.utcnow()
         if items_new == 0 and items_found > 0:
             status = "partial"
         elif items_found == 0:

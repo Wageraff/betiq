@@ -15,7 +15,7 @@ from typing import Any, Optional
 from playwright.async_api import Page
 
 from src.config import setup_logging
-from src.scraper.utils.browser import browser_lifecycle, page_session, wait_cloudflare
+from src.scraper.utils.browser import browser_lifecycle, page_session, scrape_geo_context, wait_cloudflare
 from src.scraper.utils.html_clean import clean_article_html, html_to_plain_text
 from src.scraper.utils.match_datetime import parse_schema_start_date, to_storage_datetime
 from src.scraper.utils.normalizer import (
@@ -519,29 +519,35 @@ async def parse_prediction(page: Page, url: str) -> Optional[dict]:
 
 async def run_test_parse(urls: Optional[list[tuple[str, str]]] = None) -> None:
     pairs = urls or _TEST_URLS
+    verify = SOURCE_CONFIG["base_url"].rstrip("/") + SOURCE_CONFIG["category_url"]
+    geo = SOURCE_CONFIG.get("geo")
     async with browser_lifecycle():
-        async with page_session() as (page, _proxy):
-            for expected_sport, url in pairs:
-                print(f"\n{'=' * 60}\n{url}\n")
-                data = await parse_prediction(page, url)
-                if not data:
-                    print("  FAIL: parse returned None")
-                    continue
-                ok_sport = data["sport"] == expected_sport
-                print(f"  layout:     {data.get('layout')}")
-                print(f"  teams:      {data['team_home']} vs {data['team_away']}")
-                print(f"  sport:      {data['sport']} (expected {expected_sport}) {'OK' if ok_sport else 'MISMATCH'}")
-                print(f"  competition:{data.get('competition')}")
-                print(f"  match_date: {data['match_date']}")
-                print(f"  author:     {data.get('author')}")
-                print(f"  bets:       {len(data.get('bets') or [])}")
-                for b in data.get("bets") or []:
-                    print(f"    - {b.get('bet_pick')} @ {b.get('odds')}")
-                print(f"  text_len:   {len(data.get('full_text') or '')}")
-                if data.get("event_meta"):
-                    print(f"  event_meta: {json.dumps(data['event_meta'], ensure_ascii=False)}")
-                preview = (data.get("full_text") or "")[:200].replace("\n", " ")
-                print(f"  preview:    {preview}...")
+        async with scrape_geo_context(geo):
+            async with page_session(verify_url=verify) as (page, _proxy):
+                for expected_sport, url in pairs:
+                    print(f"\n{'=' * 60}\n{url}\n")
+                    data = await parse_prediction(page, url)
+                    if not data:
+                        print("  FAIL: parse returned None")
+                        continue
+                    ok_sport = data["sport"] == expected_sport
+                    print(f"  layout:     {data.get('layout')}")
+                    print(f"  teams:      {data['team_home']} vs {data['team_away']}")
+                    print(
+                        f"  sport:      {data['sport']} (expected {expected_sport}) "
+                        f"{'OK' if ok_sport else 'MISMATCH'}"
+                    )
+                    print(f"  competition:{data.get('competition')}")
+                    print(f"  match_date: {data['match_date']}")
+                    print(f"  author:     {data.get('author')}")
+                    print(f"  bets:       {len(data.get('bets') or [])}")
+                    for b in data.get("bets") or []:
+                        print(f"    - {b.get('bet_pick')} @ {b.get('odds')}")
+                    print(f"  text_len:   {len(data.get('full_text') or '')}")
+                    if data.get("event_meta"):
+                        print(f"  event_meta: {json.dumps(data['event_meta'], ensure_ascii=False)}")
+                    preview = (data.get("full_text") or "")[:200].replace("\n", " ")
+                    print(f"  preview:    {preview}...")
 
 
 def main() -> None:

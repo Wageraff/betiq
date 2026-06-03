@@ -1,7 +1,8 @@
 # Smartproxy residential — один прокси на строку
 # http://BASE_USER_area-XX_session-UNIQUE_life-N:PASSWORD@proxy.smartproxy.net:3120
 #
-# area-RO   — страна (beturi / pontul-zilei)
+# area-RO   — страна по умолчанию в файле; при парсинге подставляется sources.geo
+#            (RO → area-RO, RU → area-RU). При сбое geo источника пробуется area-GB (proxy_fallback_geo).
 # session-* — 4–12 символов, уникально на проект (betiq001, не bwb001)
 # life-*    — минуты sticky IP (1–1440)
 #

@@ -1,9 +1,10 @@
-"""Singleton Playwright: stealth, proxy, Cloudflare-паузы (паттерны из reference_scraper)."""
+"""Singleton Playwright: stealth, proxy по geo, проверка перед парсингом."""
 from __future__ import annotations
 
 import logging
 import random
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import AsyncIterator, Optional, Tuple
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
@@ -18,6 +19,7 @@ except Exception:
     HAS_STEALTH = False
 
 from src.scraper.proxy_pool import ProxyPool
+from src.scraper.utils.match_datetime import GEO_SOURCE_TZ
 
 log = logging.getLogger("browser")
 
@@ -26,6 +28,16 @@ _PROXY_ERRORS = ("ERR_CERT", "ERR_CONNECTION", "ERR_PROXY", "ERR_TUNNEL", "net::
 _playwright: Optional[Playwright] = None
 _browser: Optional[Browser] = None
 _proxy_pool = ProxyPool()
+
+_geo_ctx: ContextVar[Optional[str]] = ContextVar("scraper_proxy_geo", default=None)
+
+GEO_LOCALE: dict[str, str] = {
+    "RO": "ro-RO",
+    "RU": "ru-RU",
+    "GB": "en-GB",
+    "UK": "en-GB",
+    "DE": "de-DE",
+}
 
 
 def ensure_proxy_configured() -> None:
@@ -43,6 +55,47 @@ def report_proxy_failure(exc: BaseException, proxy: Optional[str]) -> None:
         _proxy_pool.report_failure(proxy)
 
 
+def _resolve_geo(geo: Optional[str]) -> Optional[str]:
+    if geo:
+        return geo.strip().upper()
+    return _geo_ctx.get()
+
+
+def _browser_locale(geo: Optional[str]) -> str:
+    if geo and geo.upper() in GEO_LOCALE:
+        return GEO_LOCALE[geo.upper()]
+    return "en-US"
+
+
+def _browser_timezone(geo: Optional[str]) -> str:
+    if geo and geo.upper() in GEO_SOURCE_TZ:
+        return GEO_SOURCE_TZ[geo.upper()]
+    return settings.match_datetime_source_tz
+
+
+def _proxy_geo_candidates(geo: Optional[str]) -> list[Optional[str]]:
+    """Порядок: geo источника → fallback из config (по умолчанию GB)."""
+    out: list[Optional[str]] = []
+    if geo:
+        out.append(geo.upper())
+    fallback = (settings.proxy_fallback_geo or "GB").strip().upper()
+    if fallback and fallback not in out:
+        out.append(fallback)
+    if not out:
+        out.append(None)
+    return out
+
+
+@asynccontextmanager
+async def scrape_geo_context(geo: Optional[str]) -> AsyncIterator[None]:
+    """Задаёт geo для вложенных page_session() без явного параметра."""
+    token = _geo_ctx.set(geo.strip().upper() if geo else None)
+    try:
+        yield
+    finally:
+        _geo_ctx.reset(token)
+
+
 async def wait_cloudflare(page: Page, base_ms: int = 3000) -> None:
     title = (await page.title()) or ""
     lower = title.lower()
@@ -52,11 +105,35 @@ async def wait_cloudflare(page: Page, base_ms: int = 3000) -> None:
     await page.wait_for_timeout(random.randint(base_ms, base_ms + 2000))
 
 
-async def _launch_browser() -> Tuple[Browser, Optional[str]]:
-    proxy = _proxy_pool.get()
-    if settings.require_proxy and not proxy:
-        raise RuntimeError("No available proxies")
+async def verify_proxy_access(page: Page, url: str) -> bool:
+    """Проверка: страница открывается, без Cloudflare, есть контент."""
+    try:
+        response = await page.goto(
+            url, wait_until="domcontentloaded", timeout=settings.page_timeout
+        )
+    except Exception as e:
+        log.warning("Proxy verify goto failed %s: %s", url, e)
+        return False
 
+    await wait_cloudflare(page)
+    title = (await page.title()) or ""
+    lower = title.lower()
+    if "just a moment" in lower or "attention required" in lower:
+        return False
+
+    content = await page.content()
+    if "cf-mitigated" in content:
+        return False
+
+    status = response.status if response else 0
+    if status >= 400:
+        return False
+    if len(content) < 500:
+        return False
+    return True
+
+
+async def _launch_browser() -> Browser:
     launch_args = {
         "headless": settings.headless,
         "args": [
@@ -65,33 +142,39 @@ async def _launch_browser() -> Tuple[Browser, Optional[str]]:
             "--disable-dev-shm-usage",
         ],
     }
-    pw_proxy = ProxyPool.to_playwright(proxy)
-    if pw_proxy:
-        launch_args["proxy"] = pw_proxy
 
     global _playwright, _browser
     if _playwright is None:
         _playwright = await async_playwright().start()
     if _browser is None:
         _browser = await _playwright.chromium.launch(**launch_args)
-    return _browser, proxy
+    return _browser
 
 
-async def new_context() -> Tuple[BrowserContext, Optional[str]]:
-    browser, proxy = await _launch_browser()
-    user_agent = random.choice(USER_AGENTS)
-    context = await browser.new_context(
-        user_agent=user_agent,
-        viewport={"width": settings.viewport_width, "height": settings.viewport_height},
-        locale="en-US",
-        timezone_id="Europe/London",
-        ignore_https_errors=True,
-    )
+async def new_context(geo: Optional[str] = None) -> Tuple[BrowserContext, Optional[str]]:
+    geo = _resolve_geo(geo)
+    proxy = _proxy_pool.get(geo=geo)
+    if settings.require_proxy and not proxy:
+        raise RuntimeError("No available proxies")
+
+    browser = await _launch_browser()
+    ctx_kw: dict = {
+        "user_agent": random.choice(USER_AGENTS),
+        "viewport": {"width": settings.viewport_width, "height": settings.viewport_height},
+        "locale": _browser_locale(geo),
+        "timezone_id": _browser_timezone(geo),
+        "ignore_https_errors": True,
+    }
+    pw_proxy = ProxyPool.to_playwright(proxy)
+    if pw_proxy:
+        ctx_kw["proxy"] = pw_proxy
+
+    context = await browser.new_context(**ctx_kw)
     return context, proxy
 
 
-async def new_page() -> Tuple[Page, BrowserContext, Optional[str]]:
-    context, proxy = await new_context()
+async def new_page(geo: Optional[str] = None) -> Tuple[Page, BrowserContext, Optional[str]]:
+    context, proxy = await new_context(geo=geo)
     page = await context.new_page()
     if HAS_STEALTH:
         try:
@@ -102,13 +185,62 @@ async def new_page() -> Tuple[Page, BrowserContext, Optional[str]]:
 
 
 @asynccontextmanager
-async def page_session() -> AsyncIterator[Tuple[Page, Optional[str]]]:
-    """Контекст страницы: закрывает context после использования."""
-    page, context, proxy = await new_page()
-    try:
-        yield page, proxy
-    finally:
-        await context.close()
+async def page_session(
+    geo: Optional[str] = None,
+    *,
+    verify_url: Optional[str] = None,
+) -> AsyncIterator[Tuple[Page, Optional[str]]]:
+    """
+    Контекст страницы с прокси area-{geo}.
+    Если задан verify_url — перед yield проверяем доступность; при неудаче пробуем fallback geo.
+    """
+    geo = _resolve_geo(geo)
+    candidates = _proxy_geo_candidates(geo)
+    last_geo: Optional[str] = None
+
+    for attempt_geo in candidates:
+        context: Optional[BrowserContext] = None
+        proxy: Optional[str] = None
+        try:
+            context, proxy = await new_context(geo=attempt_geo)
+            page = await context.new_page()
+            if HAS_STEALTH:
+                try:
+                    await stealth_async(page)
+                except Exception as e:
+                    log.debug("stealth: %s", e)
+
+            if verify_url:
+                log.info(
+                    "Checking proxy (area-%s) before scrape: %s",
+                    attempt_geo or "?",
+                    verify_url,
+                )
+                if not await verify_proxy_access(page, verify_url):
+                    log.warning(
+                        "Proxy check failed for geo=%s, trying fallback if any",
+                        attempt_geo,
+                    )
+                    await context.close()
+                    last_geo = attempt_geo
+                    continue
+                log.info("Proxy OK for geo=%s", attempt_geo)
+
+            try:
+                yield page, proxy
+            finally:
+                await context.close()
+            return
+        except Exception:
+            if context is not None:
+                await context.close()
+            raise
+
+    tried = ", ".join(str(g) for g in candidates)
+    raise RuntimeError(
+        f"No working proxy for source geo={geo or '?'} (tried: {tried}). "
+        f"Last failed geo={last_geo}. Check proxies.txt area-* and connectivity."
+    )
 
 
 async def shutdown() -> None:

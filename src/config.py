@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     scrape_delay_max: float = float(_scraper.get("max_delay", fallback=5.0))
     scrape_max_retries: int = int(_scraper.get("max_retries", fallback=3))
     scrape_articles_max_age_days: int = int(_scraper.get("articles_max_age_days", fallback=7))
+    # Если area-{geo} источника недоступен — проверяем прокси с этим geo (обычно RO)
+    proxy_fallback_geo: str = _scraper.get("proxy_fallback_geo", fallback="GB")
 
     # IANA: в какой зоне на сайте показывают время матча (RO → Europe/Bucharest)
     match_datetime_source_tz: str = _datetime.get(
