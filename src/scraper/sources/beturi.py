@@ -180,11 +180,12 @@ def _is_valid_article_url(url: str) -> bool:
 
 
 def _sport_from_breadcrumbs(raw: dict) -> Optional[str]:
+    """Вид спорта: первая крошка после «Ponturi Pariuri» (Fotbal, Tenis, …)."""
     crumbs = raw.get("breadcrumbs") or []
     texts = [c.get("text", "") for c in crumbs if isinstance(c, dict)]
     for i, t in enumerate(texts):
-        if re.search(r"ponturi\s*pariuri", t, re.I) and i + 2 < len(texts):
-            sport_text = texts[i + 2].strip().lower()
+        if re.search(r"ponturi\s*pariuri", t, re.I) and i + 1 < len(texts):
+            sport_text = texts[i + 1].strip().lower()
             return normalize_sport(_SPORT_CRUMB_MAP.get(sport_text, sport_text))
     if len(texts) >= 3:
         sport_text = texts[2].strip().lower()
@@ -301,9 +302,11 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         log.warning("Skip %s: no match_date", url)
         return None
 
-    sport = _sport_from_breadcrumbs(raw) or _URL_SPORT_HINT.get(url.rstrip("/"))
-    if not sport:
-        sport = _infer_sport_from_url(url)
+    sport = (
+        _infer_sport_from_url(url)
+        or _URL_SPORT_HINT.get(url.rstrip("/"))
+        or _sport_from_breadcrumbs(raw)
+    )
     if not sport:
         log.warning("Skip %s: could not resolve sport", url)
         return None
