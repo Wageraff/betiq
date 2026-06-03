@@ -25,3 +25,6 @@ data/*.db-shm
 .idea/
 .vscode/
 .cursor/
+
+# Local notes (not for repo)
+instructions/
