@@ -165,6 +165,24 @@ def parse_match_datetime(
 
     tz = ZoneInfo(source_tz) if source_tz else get_source_zoneinfo(geo)
 
+    m_dot = re.search(
+        r"(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}))?",
+        text,
+    )
+    if m_dot:
+        day_s, mo_s, year_s, hour_s, minute_s = m_dot.groups()
+        hour = int(hour_s) if hour_s else 12
+        minute = int(minute_s) if minute_s else 0
+        local = datetime(
+            int(year_s),
+            int(mo_s),
+            int(day_s),
+            hour,
+            minute,
+            tzinfo=tz,
+        )
+        return local.astimezone(STORAGE_TZ)
+
     month_pat = "|".join(sorted(RO_MONTHS.keys(), key=len, reverse=True))
     m = re.search(
         rf"(\d{{1,2}})\s+({month_pat})(?:\s+(\d{{4}}))?,?\s*(\d{{1,2}}):(\d{{2}})",

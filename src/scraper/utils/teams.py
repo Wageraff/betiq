@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import re
 
-# Хвосты румынских заголовков прогнозов
+# Хвосты румынских заголовков прогнозов (Legalbet, Beturi и др.)
 _TITLE_SUFFIX = re.compile(
-    r"\s+ponturi\s+pariuri.*$|\s+pronostic.*$|\s+pariuri\s+.*$",
+    r"\s*:\s*(?:Ponturi|cele mai bune|pronostic).*$"
+    r"|\s+[—–]\s+(?:Ponturi|cele mai bune|pronostic).*$"
+    r"|\s+ponturi\s+pariuri.*$|\s+pronostic.*$|\s+pariuri\s+.*$",
     re.I,
 )
 
