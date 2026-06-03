@@ -284,6 +284,15 @@ _RO_DATE_TAIL = re.compile(
 )
 
 
+def _format_label(text: str) -> str:
+    if not text:
+        return text
+    letters = [c for c in text if c.isalpha()]
+    if letters and sum(c.isupper() for c in letters) / len(letters) > 0.7:
+        return text.title()
+    return text
+
+
 def _competition_from_h1(h1: str) -> str:
     text = h1.strip()
     for sep in (" – ", " — ", " - "):
@@ -297,7 +306,18 @@ def _competition_from_h1(h1: str) -> str:
                 elif re.search(r"etapa|liga|roland|garros|amical", left, re.I):
                     tail = left.strip()
             tail = _RO_DATE_TAIL.sub("", tail).strip()
-            return tail
+            return _format_label(tail)
+    m = re.search(
+        r"(Lig(?:a|ii)\s+Campionilor(?:\s+handbal)?(?:\s+masculin)?|"
+        r"Roland\s+Garros|Openului\s+Francez|Amical)",
+        text,
+        re.I,
+    )
+    if m:
+        return _format_label(m.group(1).strip())
+    m = re.search(r"semifinale(?:le)?\s+(Ligii\s+Campionilor)", text, re.I)
+    if m:
+        return _format_label(m.group(1).strip())
     return ""
 
 
@@ -425,6 +445,48 @@ def _clean_bet_pick(pick: str) -> str:
     return pick
 
 
+_SHORT_PICK_RE = re.compile(
+    r"(Pont\s+principal:[^,]+|Pont\s+[^:]+:\s*[^,]+|"
+    r"Peste\s+\d+[.,]?\d*\s+goluri|Sub\s+\d+[.,]?\d*\s+goluri|"
+    r"\d-\d+\s+goluri|GG\s*3\+|GG\b|X2\b|"
+    r"[^,.]{5,80}?\s+handicap\s*\+?[\d.,]+(?:\s+game-uri)?|"
+    r"victorie\s+(?:Dinamo|Veszprem|[A-Za-zÀ-ÿ]+)|"
+    r"câștigă\s+măcar\s+un\s+set|"
+    r"ambele\s+jucătoare\s+vor\s+câștiga\s+un\s+set|"
+    r"va\s+câștiga\s+măcar\s+un\s+set)",
+    re.I,
+)
+
+
+def _extract_short_pick(line: str) -> str:
+    """Короткий pick из длинного абзаца (Dinamo: «Peste 61.5 goluri are… cotă 1.72»)."""
+    if not line:
+        return ""
+    m = _SHORT_PICK_RE.search(line)
+    if m:
+        return _clean_bet_pick(m.group(1))
+    m = re.search(r"([^.,\n]{8,90})\s*[-–—,]\s*(?:[Cc]ot[aă]|Cota)\s", line)
+    if m:
+        frag = m.group(1).strip()
+        if len(frag) <= 100:
+            return _clean_bet_pick(frag)
+    return ""
+
+
+def _bet_pick_quality(pick: str) -> int:
+    if not pick:
+        return 0
+    if len(pick) > 220:
+        return 0
+    score = 300
+    if re.match(r"^Pont\s", pick, re.I):
+        score += 200
+    if re.search(r"peste|sub|goluri|handicap|GG|X2|victorie|set", pick, re.I):
+        score += 100
+    score -= len(pick) // 2
+    return score
+
+
 def _is_valid_bet_line(line: str) -> bool:
     if not line or len(line) < 10:
         return False
@@ -433,10 +495,12 @@ def _is_valid_bet_line(line: str) -> bool:
     if not _COTA_RE.search(line):
         return False
     if re.match(r"^Pont\s", line, re.I):
-        return True
+        return len(line) <= 400
+    if len(line) > 220:
+        return bool(_extract_short_pick(line))
     return bool(
         re.search(
-            r"peste|sub|goluri|handicap|game|set|X2|GG|vs|–|—|principal|câștig",
+            r"peste|sub|goluri|handicap|game|set|X2|GG|vs|–|—|principal|câștig|victorie",
             line,
             re.I,
         )
@@ -478,8 +542,29 @@ def _extract_bets_from_text(full_text: str) -> list[dict]:
             re.I,
         ),
         re.compile(
-            r"(.{20,180}?)\s+cot[aă]\s+(?:de\s+)?([\d.,]+)\s+la\s+",
-            re.I,
+            r"(câștigă\s+măcar\s+un\s+set|ambele\s+jucătoare\s+vor\s+câștiga\s+un\s+set)"
+            r"[^.]{0,120}?cot[aă]\s+(?:de\s+)?([\d.,]+)",
+            re.I | re.S,
+        ),
+        re.compile(
+            r"(va\s+câștiga\s+măcar\s+un\s+set)[^.]{0,80}?cot[aă]\s+(?:de\s+)?([\d.,]+)",
+            re.I | re.S,
+        ),
+        re.compile(
+            r"cot[aă]\s+(?:de\s+)?([\d.,]+)\s+că\s+(va\s+câștiga\s+măcar\s+un\s+set)",
+            re.I | re.S,
+        ),
+        re.compile(
+            r"cot[aă]\s+(?:de\s+)?([\d.,]+)\s+primită\s+pentru\s+victorie",
+            re.I | re.S,
+        ),
+        re.compile(
+            r"(victorie\s+(?:Dinamo|Veszprem))[^.]{0,60}?cot[aă]\s+([\d.,]+)",
+            re.I | re.S,
+        ),
+        re.compile(
+            r"pariu\s+pe\s+(victorie\s+Dinamo)[^.]{0,40}?cot[aă]\s+([\d.,]+)",
+            re.I | re.S,
         ),
     ]
     out: list[dict] = []
@@ -487,13 +572,30 @@ def _extract_bets_from_text(full_text: str) -> list[dict]:
     for pat in patterns:
         for m in pat.finditer(full_text):
             if m.lastindex == 2:
-                pick, odds_s = m.group(1).strip(), m.group(2)
+                g1, g2 = m.group(1).strip(), m.group(2).strip()
+                if re.match(r"^[\d.,]+$", g1):
+                    odds_s, pick = g1, g2
+                else:
+                    pick, odds_s = g1, g2
+                if pick.lower().startswith("va "):
+                    pick = "Sorana " + pick
+            elif m.lastindex == 1:
+                odds_s = m.group(1).strip()
+                snippet = m.group(0).lower()
+                if "primită" in snippet and "victorie" in snippet:
+                    pick = "Victorie Veszprem"
+                else:
+                    continue
             elif m.lastindex == 4:
                 pick = f"{m.group(1).strip()} – {m.group(2).strip()} – {m.group(3).strip()}"
                 odds_s = m.group(4)
             else:
                 continue
             pick = _clean_bet_pick(pick)
+            if len(pick) > 120:
+                short = _extract_short_pick(pick)
+                if short:
+                    pick = short
             odds = parse_odds(odds_s)
             key = (pick, str(odds) if odds else "")
             if not pick or key in seen:
@@ -524,6 +626,10 @@ def _parse_bets(raw_bets: list, full_text: str = "") -> list[dict]:
                 pick = m.group(1).strip()
             pick = _COTA_RE.sub("", pick).strip(" ,-")
             pick = _clean_bet_pick(pick)
+            if len(pick) > 120 or len(raw_line) > 150:
+                short = _extract_short_pick(raw_line) or _extract_short_pick(pick)
+                if short:
+                    pick = short
         odds = parse_odds(b.get("odds"))
         if not odds and raw_line:
             om = _COTA_RE.search(raw_line)
@@ -555,9 +661,11 @@ def _parse_bets(raw_bets: list, full_text: str = "") -> list[dict]:
     for b in out:
         key = str(b.get("odds") or "")
         prev = deduped.get(key)
-        if not prev or len(b.get("bet_pick") or "") > len(prev.get("bet_pick") or ""):
+        if not prev or _bet_pick_quality(b.get("bet_pick") or "") > _bet_pick_quality(
+            prev.get("bet_pick") or ""
+        ):
             deduped[key] = b
-    out = list(deduped.values())
+    out = sorted(deduped.values(), key=lambda x: -_bet_pick_quality(x.get("bet_pick") or ""))
     for i, b in enumerate(out):
         b["is_main"] = i == 0
     return out
