@@ -1,0 +1,18 @@
+[Unit]
+Description=BetIQ Telegram bot (polling)
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/betiq
+Environment=PYTHONPATH=/opt/betiq
+EnvironmentFile=-/opt/betiq/.env
+ExecStart=/opt/betiq/venv/bin/python3.11 -m src.bot.telegram
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

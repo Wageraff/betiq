@@ -1,0 +1,27 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+*.zip
+
+.claude/
+reference_scraper/data/
+*.log
+logs/
+
+# Secrets & local runtime (never commit)
+.env
+proxies.txt
+
+# Local DB artifacts (if any)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# IDE
+.idea/
+.vscode/
+.cursor/

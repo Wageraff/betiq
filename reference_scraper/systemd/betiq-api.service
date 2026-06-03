@@ -1,0 +1,14 @@
+[Unit]
+Description=BetIQ Parser REST API
+After=network.target
+
+[Service]
+Type=simple
+User=parser
+WorkingDirectory=/home/parser/betiq
+ExecStart=/home/parser/betiq/venv/bin/python -m app.api
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

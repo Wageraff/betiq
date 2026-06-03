@@ -1,0 +1,15 @@
+# ============================================================
+#  BetIQ — URL для парсинга прогнозов (по одному на строку)
+# ============================================================
+#
+# Источники из стратегии (core.txt):
+#   legalbet.ru, vprognoze.ru, vseprosport.ru, metaratings.ru, ...
+#
+# Добавь конкретные URL страниц прогнозов / матчей.
+# Пример:
+# https://legalbet.ru/tips/today/
+# https://www.vprognoze.ru/forecast/...
+
+# --- примеры (раскомментируй и замени на реальные URL) ---
+# https://legalbet.ru/match/...
+# https://www.vprognoze.ru/...
