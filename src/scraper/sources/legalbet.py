@@ -156,40 +156,55 @@ _PARSE_JS = """
   let team_home = '', team_away = '', kickoff = '', sport = '', competition = '';
   let author = '', content_html = '', event_meta = {};
 
-  const pickBets = (root) => {
+  const cleanElText = (el) => {
+    if (!el) return '';
+    return (el.textContent || '').trim().replace(/\\s+/g, ' ');
+  };
+
+  const extractBetsFromCards = (root, cardSel, pickSel, oddsSel) => {
     const bets = [];
     if (!root) return bets;
-    const cards = root.querySelectorAll('[class*="bet"], .forecast-bet, li, .grand-forecast__bet');
-    if (cards.length) {
-      for (const card of cards) {
-        const t = (card.innerText || '').trim();
-        const lines = t.split('\\n').map(l => l.trim()).filter(Boolean);
-        let pick = '', odds = '';
-        const pickIdx = lines.findIndex(l => /^ponturi$/i.test(l));
-        const oddsIdx = lines.findIndex(l => /^cote$/i.test(l));
-        if (pickIdx >= 0 && lines[pickIdx + 1]) pick = lines[pickIdx + 1];
-        if (oddsIdx >= 0 && lines[oddsIdx + 1]) odds = lines[oddsIdx + 1];
-        if (!pick && lines.length >= 1) pick = lines[0];
-        if (!odds) {
-          const o = t.match(/([\\d]+[.,][\\d]+)/);
-          if (o) odds = o[1];
-        }
-        if (pick || odds) bets.push({ bet_type: '1X2', bet_pick: pick, odds: odds.replace(',', '.'), is_main: bets.length === 0 });
-      }
+    for (const card of root.querySelectorAll(cardSel)) {
+      const pick = cleanElText(card.querySelector(pickSel));
+      const odds = cleanElText(card.querySelector(oddsSel)).replace(',', '.');
+      if (!pick || /^ponturi$/i.test(pick) || /^cote$/i.test(pick)) continue;
+      if (!odds || !/^[\\d]+[.,][\\d]+$/.test(odds)) continue;
+      bets.push({
+        bet_type: '1X2',
+        bet_pick: pick,
+        odds,
+        is_main: bets.length === 0,
+      });
     }
+    return bets;
+  };
+
+  const extractForecastBets = () => {
+    const root = document.querySelector('.forecast__bets');
+    return extractBetsFromCards(
+      root,
+      '.exp-forecast__bet',
+      '.exp-forecast__bet-text',
+      '.exp-forecast__coefs-num'
+    );
+  };
+
+  const extractGrandBets = () => {
+    const root = document.querySelector('.grand-forecast__bets');
+    if (!root) return [];
+    let bets = extractBetsFromCards(
+      root,
+      '.grand-forecast__bet',
+      '.grand-forecast__bet-text',
+      '.grand-forecast__coefs-num'
+    );
     if (!bets.length) {
-      const t = (root.innerText || '').trim();
-      const lines = t.split('\\n').map(l => l.trim()).filter(Boolean);
-      const pickIdx = lines.indexOf('Ponturi');
-      const oddsIdx = lines.indexOf('Cote');
-      if (pickIdx >= 0 && oddsIdx > pickIdx) {
-        bets.push({
-          bet_type: '1X2',
-          bet_pick: lines[pickIdx + 1] || '',
-          odds: (lines[oddsIdx + 1] || '').replace(',', '.'),
-          is_main: true,
-        });
-      }
+      bets = extractBetsFromCards(
+        root,
+        '.exp-forecast__bet',
+        '.exp-forecast__bet-text',
+        '.exp-forecast__coefs-num'
+      );
     }
     return bets;
   };
@@ -219,10 +234,8 @@ _PARSE_JS = """
       || document.querySelector('.forecast__text-content[itemprop="articleBody"]')
       || document.querySelector('.forecast__text-content');
     content_html = htmlEl?.innerHTML || '';
-    var bets = pickBets(
-      document.querySelector('.grand-forecast__bets')
-      || document.querySelector('.forecast__bets.mb-6, .forecast__bets')
-    );
+    var bets = extractGrandBets();
+    if (!bets.length) bets = extractForecastBets();
   } else if (layout === 'forecast') {
     const names = document.querySelector('.forecast-head__names');
     if (names) {
@@ -244,7 +257,7 @@ _PARSE_JS = """
     const htmlEl = document.querySelector('.forecast__text-content[itemprop="articleBody"]')
       || document.querySelector('.forecast__text-content');
     content_html = htmlEl?.innerHTML || '';
-    var bets = pickBets(document.querySelector('.forecast__bets.mb-6, .forecast__bets'));
+    var bets = extractForecastBets();
   } else {
     author = document.querySelector('[class*="author"]')?.textContent?.trim() || '';
     content_html = document.querySelector('article')?.innerHTML || '';
@@ -362,20 +375,31 @@ def _build_match_date(raw: dict, url: str) -> Optional[datetime]:
     return default_kickoff_utc(d) if d else None
 
 
+_JUNK_PICK = re.compile(r"^ponturi$|^cote$", re.I)
+
+
 def _parse_bets(raw_bets: list) -> list[dict]:
     out = []
+    seen: set[tuple[str, str]] = set()
     for i, b in enumerate(raw_bets or []):
-        odds = parse_odds(b.get("odds"))
         pick = (b.get("bet_pick") or "").strip()
-        if pick or odds:
-            out.append(
-                {
-                    "bet_type": b.get("bet_type") or "1X2",
-                    "bet_pick": pick,
-                    "odds": odds,
-                    "is_main": b.get("is_main", i == 0),
-                }
-            )
+        if not pick or _JUNK_PICK.match(pick):
+            continue
+        odds = parse_odds(b.get("odds"))
+        if odds is None:
+            continue
+        key = (pick, str(odds))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "bet_type": b.get("bet_type") or "1X2",
+                "bet_pick": pick,
+                "odds": odds,
+                "is_main": b.get("is_main", len(out) == 0),
+            }
+        )
     return out
 
 
