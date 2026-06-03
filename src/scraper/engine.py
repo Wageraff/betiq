@@ -33,6 +33,7 @@ from src.scraper.utils.alerter import (
     alert_scrape_error,
 )
 from src.scraper.utils.match_key import find_or_create_match
+from src.scraper.utils.match_datetime import to_storage_datetime
 from src.scraper.utils.normalizer import is_upcoming_match, parse_date_from_url
 
 log = logging.getLogger("engine")
@@ -70,6 +71,10 @@ async def _persist_prediction(
     if not is_upcoming_match(data["match_date"]):
         log.info("Skip %s: match already past (%s)", data.get("source_url"), data["match_date"])
         return False
+
+    data["match_date"] = to_storage_datetime(
+        data["match_date"], geo=getattr(source, "geo", None)
+    )
 
     match = await find_or_create_match(session, data)
     pred = Prediction(

@@ -18,8 +18,9 @@ from playwright.async_api import Page
 from src.config import setup_logging
 from src.scraper.utils.browser import browser_lifecycle, page_session, wait_cloudflare
 from src.scraper.utils.html_clean import clean_article_html, html_to_plain_text
+from src.scraper.utils.match_datetime import parse_schema_start_date, to_storage_datetime
 from src.scraper.utils.normalizer import (
-    default_kickoff_utc,
+    default_kickoff_storage,
     normalize_sport,
     parse_date,
     parse_date_from_url,
@@ -361,18 +362,22 @@ def _resolve_sport_and_competition(raw: dict, url: str, layout: str) -> tuple[st
 
 
 def _build_match_date(raw: dict, url: str) -> Optional[datetime]:
+    geo = SOURCE_CONFIG.get("geo")
     kickoff = raw.get("kickoff") or raw.get("metaDate") or ""
     event = raw.get("event_meta") or {}
     if event.get("startDate"):
         kickoff = event["startDate"]
-    dt = parse_match_datetime(str(kickoff), url=url)
+        dt = parse_schema_start_date(str(kickoff), geo=geo)
+        if dt:
+            return dt
+    dt = parse_match_datetime(str(kickoff), url=url, geo=geo)
     if dt:
         return dt
     dt = parse_date(raw.get("metaDate"))
     if dt:
-        return dt
+        return to_storage_datetime(dt, geo=geo)
     d = parse_date_from_url(url)
-    return default_kickoff_utc(d) if d else None
+    return default_kickoff_storage(d, geo=geo) if d else None
 
 
 _JUNK_PICK = re.compile(r"^ponturi$|^cote$", re.I)

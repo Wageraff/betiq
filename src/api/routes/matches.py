@@ -23,8 +23,20 @@ from src.api.schemas import (
     SportsListResponse,
 )
 from src.db.models import Match, Prediction
+from src.scraper.utils.match_datetime import api_datetime_meta, to_storage_datetime
 
 router = APIRouter(prefix="/api/v1", tags=["matches"])
+
+
+def _match_out_fields(match: Match) -> dict:
+    """Общие поля матча для API, включая метаданные часовых поясов."""
+    geo = None
+    if match.predictions and match.predictions[0].source:
+        geo = match.predictions[0].source.geo
+    return {
+        "match_date": to_storage_datetime(match.match_date, geo=geo),
+        **api_datetime_meta(geo),
+    }
 
 
 def _ai_from_match(match: Match) -> Optional[AiOut]:
@@ -109,9 +121,9 @@ async def list_matches(
             team_away=m.team_away,
             sport=m.sport,
             competition=m.competition,
-            match_date=m.match_date,
             predictions_count=m.predictions_count or 0,
             ai=_ai_from_match(m),
+            **_match_out_fields(m),
         )
         for m in matches
     ]
@@ -160,9 +172,9 @@ async def get_match(slug: str, db: AsyncSession = Depends(get_db)):
             team_away=match.team_away,
             sport=match.sport,
             competition=match.competition,
-            match_date=match.match_date,
             predictions_count=match.predictions_count or 0,
             ai=_ai_from_match(match),
+            **_match_out_fields(match),
         ),
         predictions=[_prediction_out(p) for p in predictions],
     )

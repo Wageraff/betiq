@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Optional, Union
 from zoneinfo import ZoneInfo
 
-SCRAPE_TZ = ZoneInfo("Europe/Bucharest")
+from src.scraper.utils.match_datetime import (
+    STORAGE_TZ,
+    default_kickoff_storage,
+    parse_schema_start_date,
+    to_storage_datetime,
+)
 
 RO_MONTHS = {
     "ianuarie": 1,
@@ -111,37 +116,54 @@ def _parse_ro_date(text: str) -> Optional[date]:
 
 
 def parse_date(raw: Optional[str]) -> Optional[datetime]:
+    """Дата публикации / meta (возвращает aware UTC)."""
     if not raw:
         return None
     text = str(raw).strip()
-    if "T" in text:
+    schema = parse_schema_start_date(text)
+    if schema:
+        return schema
+    if "T" in text or re.search(r"\d{4}-\d{2}-\d{2}", text):
         try:
             dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            return dt.astimezone(SCRAPE_TZ).replace(tzinfo=None)
+            return to_storage_datetime(dt)
         except ValueError:
             pass
     d = _parse_ro_date(text)
     if d:
-        return datetime.combine(d, datetime.min.time())
+        return default_kickoff_storage(d, hour=0, minute=0)
     return None
 
 
-def default_kickoff_utc(d: date) -> datetime:
-    """Полдень по Бухаресту → UTC-naive для хранения."""
-    local = datetime.combine(d, time(12, 0), tzinfo=SCRAPE_TZ)
-    return local.astimezone(timezone.utc).replace(tzinfo=None)
+# Обратная совместимость импортов
+default_kickoff_utc = default_kickoff_storage
 
 
-def parse_match_datetime(text: str, *, url: Optional[str] = None) -> Optional[datetime]:
+def parse_match_datetime(
+    text: str,
+    *,
+    url: Optional[str] = None,
+    source_tz: Optional[str] = None,
+    geo: Optional[str] = None,
+) -> Optional[datetime]:
     """
-    Дата/время матча со страницы: «3 iunie, 12:00 (EEST)» или ISO из meta.
+    Дата/время матча со страницы → aware UTC.
+    Текст без TZ (рум. месяцы, schema.org) трактуется как source_tz.
     """
     if not text:
         text = ""
+    schema = parse_schema_start_date(text, source_tz=source_tz, geo=geo)
+    if schema:
+        return schema
+
     if "T" in text and re.search(r"\d{2}:\d{2}", text):
-        iso = parse_date(text)
-        if iso:
-            return match_datetime_utc_naive(iso)
+        parsed = parse_date(text)
+        if parsed:
+            return parsed
+
+    from src.scraper.utils.match_datetime import get_source_zoneinfo
+
+    tz = ZoneInfo(source_tz) if source_tz else get_source_zoneinfo(geo)
 
     month_pat = "|".join(sorted(RO_MONTHS.keys(), key=len, reverse=True))
     m = re.search(
@@ -154,35 +176,26 @@ def parse_match_datetime(text: str, *, url: Optional[str] = None) -> Optional[da
         month = RO_MONTHS.get(month_name.lower())
         if month:
             year = int(year_s) if year_s else date.today().year
-            dt = datetime(year, month, int(day_s), int(hour_s), int(minute_s))
-            return dt.replace(tzinfo=SCRAPE_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+            local = datetime(
+                year, month, int(day_s), int(hour_s), int(minute_s), tzinfo=tz
+            )
+            return local.astimezone(STORAGE_TZ)
 
     d = _parse_ro_date(text)
     if d:
-        return datetime.combine(d, time(12, 0))
+        return default_kickoff_storage(d, source_tz=source_tz, geo=geo)
 
     if url:
         slug_d = parse_date_from_url(url)
         if slug_d:
-            return default_kickoff_utc(slug_d)
+            return default_kickoff_storage(slug_d, source_tz=source_tz, geo=geo)
     return None
 
 
-def match_datetime_utc_naive(dt: datetime) -> datetime:
-    """Привести naive datetime к UTC-naive для сравнения с now."""
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
-    local = dt.replace(tzinfo=SCRAPE_TZ)
-    return local.astimezone(timezone.utc).replace(tzinfo=None)
-
-
 def is_upcoming_match(match_date: Optional[datetime], *, grace_hours: int = 6) -> bool:
-    """Матч ещё актуален (не завершился более grace_hours назад)."""
-    if not match_date:
-        return True
-    kickoff = match_datetime_utc_naive(match_date)
-    cutoff = datetime.utcnow() - timedelta(hours=grace_hours)
-    return kickoff >= cutoff
+    from src.scraper.utils.match_datetime import is_upcoming_match as _is_upcoming
+
+    return _is_upcoming(match_date, grace_hours=grace_hours)
 
 
 def parse_date_from_url(url: str) -> Optional[date]:

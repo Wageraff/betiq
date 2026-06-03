@@ -22,6 +22,7 @@ def _read_config() -> configparser.ConfigParser:
 
 _cfg = _read_config()
 _scraper = _cfg["scraper"] if _cfg.has_section("scraper") else {}
+_datetime = _cfg["datetime"] if _cfg.has_section("datetime") else {}
 _logging = _cfg["logging"] if _cfg.has_section("logging") else {}
 
 
@@ -54,6 +55,13 @@ class Settings(BaseSettings):
     scrape_delay_max: float = float(_scraper.get("max_delay", fallback=5.0))
     scrape_max_retries: int = int(_scraper.get("max_retries", fallback=3))
     scrape_articles_max_age_days: int = int(_scraper.get("articles_max_age_days", fallback=7))
+
+    # IANA: в какой зоне на сайте показывают время матча (RO → Europe/Bucharest)
+    match_datetime_source_tz: str = _datetime.get(
+        "source_timezone", fallback="Europe/Bucharest"
+    )
+    # В БД и API matchDate всегда в UTC (см. match_datetime.py)
+    match_datetime_storage_tz: str = _datetime.get("storage_timezone", fallback="UTC")
 
     log_level: str = _logging.get("level", fallback="INFO")
     log_file: str = str(BASE_DIR / _logging.get("file", fallback="logs/app.log"))

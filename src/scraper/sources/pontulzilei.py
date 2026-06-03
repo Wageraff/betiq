@@ -9,7 +9,7 @@ from playwright.async_api import Page
 
 from src.scraper.utils.browser import wait_cloudflare
 from src.scraper.utils.normalizer import (
-    default_kickoff_utc,
+    default_kickoff_storage,
     normalize_sport,
     parse_date,
     parse_date_from_url,
@@ -143,16 +143,18 @@ async def parse_prediction(page: Page, url: str) -> Optional[dict]:
         return None
 
     full_text = raw.get("full_text") or ""
+    geo = SOURCE_CONFIG.get("geo")
     match_date = parse_match_datetime(
         raw.get("kickoff") or raw.get("metaDate") or full_text[:1200],
         url=url,
+        geo=geo,
     )
     if not match_date:
         match_date = parse_date(raw.get("metaDate"))
     if not match_date:
         d = parse_date_from_url(url)
         if d:
-            match_date = default_kickoff_utc(d)
+            match_date = default_kickoff_storage(d, geo=geo)
 
     if not match_date:
         return None

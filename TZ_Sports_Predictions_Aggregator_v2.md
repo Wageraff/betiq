@@ -548,6 +548,8 @@ GET /api/v1/sports
     "sport": "football",
     "competition": "International Friendly",
     "matchDate": "2026-06-02T20:00:00Z",
+    "matchDateTimezone": "UTC",
+    "matchDateSourceTimezone": "Europe/Bucharest",
     "predictionsCount": 5,
     "ai": {
       "summary": "Most tipsters agree Romania will control the game...",

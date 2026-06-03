@@ -48,7 +48,20 @@ class MatchBriefOut(BaseModel):
     team_away: str = Field(serialization_alias="teamAway")
     sport: Optional[str] = None
     competition: Optional[str] = None
-    match_date: Optional[datetime] = Field(None, serialization_alias="matchDate")
+    match_date: Optional[datetime] = Field(
+        None,
+        serialization_alias="matchDate",
+        description="Kickoff instant in UTC (ISO 8601)",
+    )
+    match_date_timezone: str = Field(
+        "UTC",
+        serialization_alias="matchDateTimezone",
+        description="IANA timezone of matchDate (storage/API contract, always UTC)",
+    )
+    match_date_source_timezone: str = Field(
+        serialization_alias="matchDateSourceTimezone",
+        description="IANA timezone used when parsing time from source site",
+    )
     predictions_count: int = Field(0, serialization_alias="predictionsCount")
     ai: Optional[AiOut] = None
 
@@ -62,7 +75,20 @@ class MatchDetailOut(BaseModel):
     team_away: str = Field(serialization_alias="teamAway")
     sport: Optional[str] = None
     competition: Optional[str] = None
-    match_date: Optional[datetime] = Field(None, serialization_alias="matchDate")
+    match_date: Optional[datetime] = Field(
+        None,
+        serialization_alias="matchDate",
+        description="Kickoff instant in UTC (ISO 8601)",
+    )
+    match_date_timezone: str = Field(
+        "UTC",
+        serialization_alias="matchDateTimezone",
+        description="IANA timezone of matchDate (storage/API contract, always UTC)",
+    )
+    match_date_source_timezone: str = Field(
+        serialization_alias="matchDateSourceTimezone",
+        description="IANA timezone used when parsing time from source site",
+    )
     predictions_count: int = Field(0, serialization_alias="predictionsCount")
     ai: Optional[AiOut] = None
 
