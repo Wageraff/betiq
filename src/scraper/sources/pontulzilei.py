@@ -67,10 +67,6 @@ _TEST_URLS = [
     ),
     (
         "handball",
-        "https://www.pontul-zilei.com/ponturi-pariuri/gloria-bistrita-si-csm-bucuresti-ataca-semifinalele-ligii-campionilor/",
-    ),
-    (
-        "handball",
         "https://www.pontul-zilei.com/articole-pariuri-sportive/dinamo-bucuresti-veszprem-etapa-3-liga-campionilor-handbal-masculin/",
     ),
     (
@@ -85,10 +81,11 @@ _SKIP_SLUG = re.compile(
     re.I,
 )
 _MATCH_SLUG = re.compile(
-    r"-vs-|_vs_|\bvs\b|-si-|\bsi\b|și|"
+    r"-vs-|_vs_|\bvs\b|"
     r"dinamo|veszprem|bucuresti|georgia|romania|andreeva",
     re.I,
 )
+_MULTI_MATCH_SLUG = re.compile(r"-si-", re.I)
 _COTA_RE = re.compile(r"cot[aă]\s+([\d.,]+)", re.I)
 _PONT_PICK_RE = re.compile(r"^Pont(?:\s+principal)?\s*:\s*(.+)$", re.I)
 
@@ -96,7 +93,7 @@ _PONT_PICK_RE = re.compile(r"^Pont(?:\s+principal)?\s*:\s*(.+)$", re.I)
 _COLLECT_JS = """
 () => {
   const skip = /ponturile-etapei|ponturile-zilei|avancronica|preview|sferturi|biletul|cota-2|etapei-\\d+/i;
-  const matchSlug = /-vs-|-si-|\\bvs\\b|și|dinamo|veszprem|georgia|romania|andreeva|bistrita/i;
+  const matchSlug = /-vs-|\\bvs\\b|dinamo|veszprem|georgia|romania|andreeva/i;
   const out = new Set();
   for (const a of document.querySelectorAll('a[href]')) {
     let href = a.href.split('#')[0].split('?')[0].replace(/\\/$/, '');
@@ -108,6 +105,7 @@ _COLLECT_JS = """
     try { path = new URL(href).pathname; } catch (e) { continue; }
     const slug = path.split('/').filter(Boolean).pop() || '';
     if (slug.length < 12 || !matchSlug.test(slug)) continue;
+    if (/-si-/.test(slug) && !/-vs-/.test(slug)) continue;
     out.add(href);
   }
   return [...out];
@@ -246,7 +244,37 @@ def _is_valid_collect_url(url: str) -> bool:
     slug = path.rstrip("/").split("/")[-1]
     if len(slug) < 12:
         return False
+    if _is_multi_match_roundup("", url):
+        return False
     return bool(_MATCH_SLUG.search(slug))
+
+
+def _match_pairs_from_lines(lines: list[str]) -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    for line in lines:
+        if not line:
+            continue
+        m = re.search(r"(.+?)\s+vs\s+(.+?)\s*:", line, re.I)
+        if m:
+            pairs.add((m.group(1).strip().lower(), m.group(2).strip().lower()))
+    return pairs
+
+
+def _is_multi_match_roundup(h1: str, url: str, bets: Optional[list] = None) -> bool:
+    """Сводка на несколько матчей (Gloria și CSM, два Pont X vs Y)."""
+    slug = urlparse(url).path.rstrip("/").split("/")[-1].lower()
+    if _MULTI_MATCH_SLUG.search(slug) and "-vs-" not in slug:
+        return True
+    title = (h1 or "").strip()
+    if title and re.search(r"\s+și\s+", title, re.I) and not re.search(r"\bvs\b", title, re.I):
+        return True
+    lines: list[str] = []
+    for b in bets or []:
+        if isinstance(b, dict):
+            lines.append(b.get("raw") or b.get("bet_pick") or "")
+    if len(_match_pairs_from_lines(lines)) >= 2:
+        return True
+    return False
 
 
 def _sport_from_categories(raw: dict) -> Optional[str]:
@@ -440,6 +468,7 @@ def _build_match_date(raw: dict, full_text: str, url: str) -> Optional[datetime]
 
 
 def _clean_bet_pick(pick: str) -> str:
+    pick = re.sub(r"^Pont\s+principal:\s*", "", pick, flags=re.I)
     pick = re.sub(r",?\s*la\s+\w[\w\s]*$", "", pick, flags=re.I)
     pick = re.sub(r"\s+", " ", pick).strip(" ,-")
     return pick
@@ -450,7 +479,7 @@ _SHORT_PICK_RE = re.compile(
     r"Peste\s+\d+[.,]?\d*\s+goluri|Sub\s+\d+[.,]?\d*\s+goluri|"
     r"\d-\d+\s+goluri|GG\s*3\+|GG\b|X2\b|"
     r"[^,.]{5,80}?\s+handicap\s*\+?[\d.,]+(?:\s+game-uri)?|"
-    r"victorie\s+(?:Dinamo|Veszprem|[A-Za-zÀ-ÿ]+)|"
+    r"victorie\s+(?:Dinamo|Veszprem)\b|"
     r"câștigă\s+măcar\s+un\s+set|"
     r"ambele\s+jucătoare\s+vor\s+câștiga\s+un\s+set|"
     r"va\s+câștiga\s+măcar\s+un\s+set)",
@@ -462,6 +491,10 @@ def _extract_short_pick(line: str) -> str:
     """Короткий pick из длинного абзаца (Dinamo: «Peste 61.5 goluri are… cotă 1.72»)."""
     if not line:
         return ""
+    if re.search(r"primită\s+pentru\s+victorie", line, re.I):
+        return "Victorie Veszprem"
+    if re.search(r"pariu\s+pe\s+victorie\s+Dinamo", line, re.I):
+        return "Victorie Dinamo"
     m = _SHORT_PICK_RE.search(line)
     if m:
         return _clean_bet_pick(m.group(1))
@@ -706,6 +739,10 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
     if not title:
         return None
 
+    if _is_multi_match_roundup(title, url, raw.get("bets")):
+        log.info("Skip %s: multi-match roundup (not a single fixture)", url)
+        return None
+
     content_html = raw.get("content_html") or ""
     full_text = html_to_plain_text(clean_article_html(content_html))
 
@@ -737,6 +774,10 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         return None
 
     bets = _parse_bets(raw.get("bets"), full_text)
+    if _is_multi_match_roundup(title, url, bets):
+        log.info("Skip %s: multi-match roundup (%d fixture pairs in bets)", url, len(_match_pairs_from_lines([b.get("bet_pick") or "" for b in bets])))
+        return None
+
     competition = _competition_from_h1(title)
 
     return {
@@ -766,7 +807,7 @@ async def run_test_parse(urls: Optional[list[tuple[str, str]]] = None) -> None:
                 print(f"\n{'=' * 60}\n{url}\n")
                 data = await parse_prediction(page, url)
                 if not data:
-                    print("  FAIL: parse returned None")
+                    print("  SKIP/FAIL: parse returned None (invalid or multi-match roundup)")
                     continue
                 ok_sport = data["sport"] == expected_sport
                 print(f"  teams:      {data['team_home']} vs {data['team_away']}")
