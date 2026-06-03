@@ -62,4 +62,5 @@ def parse_teams_from_preview(text: str) -> tuple[str, str]:
 def _trim_away(away: str) -> str:
     away = away.strip()
     away = re.sub(r"\s+\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}.*$", "", away)
+    away = re.sub(r",\s+.*$", "", away)
     return away.strip()
