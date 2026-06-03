@@ -178,22 +178,42 @@ _PARSE_JS = """
     bets.push({ bet_type: '1X2', bet_pick: pick || line, odds, is_main: bets.length === 0, raw: line });
   }
 
+  function looksLikeBet(line) {
+    if (!line || line.length < 10) return false;
+    if (/^casele de pariuri$/i.test(line)) return false;
+    if (/^Pont\\s/i.test(line)) return true;
+    if (!/cot[aă]\\s*[\\d.,]+/i.test(line)) return false;
+    return /peste|sub|goluri|handicap|game|set|X2|GG|vs|–|—|câștig|va\\s|câștige|principal/i.test(line);
+  }
+
   if (contentRoot) {
-    for (const h of contentRoot.querySelectorAll('h2, h3, h4, strong, p')) {
-      if (!/ponturi\\s+recomandate/i.test(h.textContent || '')) continue;
-      let el = h.nextElementSibling;
-      for (let i = 0; i < 8 && el; i++, el = el.nextElementSibling) {
-        if (el.matches('ul, ol')) {
-          for (const li of el.querySelectorAll('li')) addBet(li.innerText);
-          break;
+    for (const h of contentRoot.querySelectorAll('h3, h4')) {
+      const t = (h.innerText || '').trim();
+      if (/^Pont/i.test(t) || looksLikeBet(t)) addBet(t);
+    }
+    let inRec = false;
+    for (const el of contentRoot.querySelectorAll('h2, h3, p, ul, ol')) {
+      const tag = el.tagName;
+      const txt = el.innerText || '';
+      if (tag === 'H2' && /ponturi\\s+recomandate/i.test(txt)) { inRec = true; continue; }
+      if (inRec && tag === 'H2') break;
+      if (!inRec) continue;
+      if (tag === 'H3' || tag === 'P') {
+        if (looksLikeBet(txt.trim())) addBet(txt.trim());
+      }
+      if (tag === 'UL' || tag === 'OL') {
+        for (const li of el.querySelectorAll('li')) {
+          const lt = (li.innerText || '').trim();
+          if (looksLikeBet(lt)) addBet(lt);
         }
       }
     }
     for (const span of contentRoot.querySelectorAll('span[style]')) {
       const st = (span.getAttribute('style') || '').toLowerCase();
       if (!st.includes('#ff0000') && !st.includes('ff0000')) continue;
-      const t = span.innerText?.trim() || '';
-      if (/pont/i.test(t)) addBet(t);
+      const block = span.closest('h3, h4, p, li') || span;
+      const t = (block.innerText || '').trim();
+      if (looksLikeBet(t)) addBet(t);
     }
   }
 
@@ -256,14 +276,40 @@ def _infer_sport_from_url(url: str) -> Optional[str]:
     return None
 
 
+_RO_DATE_TAIL = re.compile(
+    r"\s+\d{1,2}\s+"
+    r"(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|"
+    r"septembrie|octombrie|noiembrie|decembrie)\s+\d{4}.*$",
+    re.I,
+)
+
+
 def _competition_from_h1(h1: str) -> str:
     text = h1.strip()
     for sep in (" – ", " — ", " - "):
         if sep in text:
             tail = text.split(sep, 1)[1].strip()
             tail = re.sub(r"^Ponturi\s+pariuri\s+", "", tail, flags=re.I)
+            if "," in tail:
+                left, right = tail.split(",", 1)
+                if re.search(r"etapa|liga|roland|garros|amical|champions", right, re.I):
+                    tail = right.strip()
+                elif re.search(r"etapa|liga|roland|garros|amical", left, re.I):
+                    tail = left.strip()
+            tail = _RO_DATE_TAIL.sub("", tail).strip()
             return tail
     return ""
+
+
+def _fix_team_case(name: str) -> str:
+    """H1 с text-transform: uppercase на сайте."""
+    letters = [c for c in name if c.isalpha()]
+    if not letters:
+        return name
+    upper_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
+    if upper_ratio >= 0.85:
+        return name.title()
+    return name
 
 
 def _extract_match_day_text(h1: str, breadcrumbs_text: str, url: str) -> str:
@@ -309,38 +355,46 @@ def _build_kickoff_text(raw: dict, full_text: str, url: str) -> str:
 def _teams_from_pick_lines(lines: list[str]) -> tuple[str, str]:
     for line in lines:
         m = re.search(
-            r"(?:Pont\s+)?([A-Za-zÀ-ÿ0-9 .'()‑-]{2,50}?)\s+vs\s+"
-            r"([A-Za-zÀ-ÿ0-9 .'()‑-]{2,50}?)\s*[:\-]",
+            r"(?:Pont\s+)?(.+?)\s+vs\s+(.+?)\s*:",
             line,
             re.I,
         )
         if m:
-            return m.group(1).strip(), m.group(2).strip()
+            home = re.sub(r"^Pont\s+", "", m.group(1).strip(), flags=re.I)
+            return home.strip(), m.group(2).strip()
+    return "", ""
+
+
+def _teams_from_slug(url: str) -> tuple[str, str]:
+    slug = urlparse(url).path.rstrip("/").split("/")[-1].lower()
+    m = re.search(r"^([a-z0-9]+(?:-[a-z0-9]+)*)-vs-([a-z0-9]+(?:-[a-z0-9]+)*)", slug)
+    if m:
+        return m.group(1).replace("-", " ").title(), m.group(2).replace("-", " ").title()
+    m = re.search(r"^([a-z0-9]+(?:-[a-z0-9]+)*)-([a-z0-9]+)-etapa", slug)
+    if m:
+        return m.group(1).replace("-", " ").title(), m.group(2).replace("-", " ").title()
     return "", ""
 
 
 def _resolve_teams(raw: dict, url: str) -> tuple[str, str]:
     h1 = raw.get("h1") or ""
     og = raw.get("ogTitle") or ""
+    meta_title = (raw.get("meta") or {}).get("title") or ""
     picks = [b.get("raw") or b.get("bet_pick") or "" for b in raw.get("bets") or []]
 
-    for title in (h1, og):
+    slug_home, slug_away = _teams_from_slug(url)
+
+    for title in (h1, og, meta_title):
         home, away = parse_teams_from_title(title)
         if home and away:
-            return home, away
+            return _fix_team_case(home), _fix_team_case(away)
 
     home, away = _teams_from_pick_lines(picks)
     if home and away:
-        return home, away
+        return _fix_team_case(home), _fix_team_case(away)
 
-    slug = urlparse(url).path.rstrip("/").split("/")[-1]
-    m = re.search(r"^([a-z0-9-]+)-vs-([a-z0-9-]+)-", slug, re.I)
-    if m:
-        return m.group(1).replace("-", " ").title(), m.group(2).replace("-", " ").title()
-
-    m = re.search(r"^([a-z0-9-]+)-([a-z0-9-]+)-etapa", slug, re.I)
-    if m:
-        return m.group(1).replace("-", " ").title(), m.group(2).replace("-", " ").title()
+    if slug_home and slug_away:
+        return slug_home, slug_away
 
     return "", ""
 
@@ -365,34 +419,147 @@ def _build_match_date(raw: dict, full_text: str, url: str) -> Optional[datetime]
     return default_kickoff_storage(d, geo=geo) if d else None
 
 
-def _parse_bets(raw_bets: list) -> list[dict]:
+def _clean_bet_pick(pick: str) -> str:
+    pick = re.sub(r",?\s*la\s+\w[\w\s]*$", "", pick, flags=re.I)
+    pick = re.sub(r"\s+", " ", pick).strip(" ,-")
+    return pick
+
+
+def _is_valid_bet_line(line: str) -> bool:
+    if not line or len(line) < 10:
+        return False
+    if re.match(r"^casele de pariuri$", line, re.I):
+        return False
+    if not _COTA_RE.search(line):
+        return False
+    if re.match(r"^Pont\s", line, re.I):
+        return True
+    return bool(
+        re.search(
+            r"peste|sub|goluri|handicap|game|set|X2|GG|vs|–|—|principal|câștig",
+            line,
+            re.I,
+        )
+    )
+
+
+def _extract_bets_from_text(full_text: str) -> list[dict]:
+    """Fallback: ставки из h3/p, если JS собрал мусор из ul «Alte informații»."""
+    if not full_text:
+        return []
+    patterns = [
+        re.compile(
+            r"Pont\s+principal:\s*(.+?),\s*cot[aă]\s+([\d.,]+)",
+            re.I,
+        ),
+        re.compile(
+            r"Pont\s+[^:]+:\s*(.+?),\s*cot[aă]\s+([\d.,]+)",
+            re.I,
+        ),
+        re.compile(
+            r"(\d-\d+\s+goluri)\s*[-–—]\s*(?:[Cc]ot[aă]|Cota)\s+([\d.,]+)",
+            re.I,
+        ),
+        re.compile(
+            r"((?:GG\s*3\+|GG|X2|2-\d+\s+goluri)[^,\n]{0,40}),\s*(?:[Cc]ot[aă]|Cota)\s+([\d.,]+)",
+            re.I,
+        ),
+        re.compile(
+            r"((?:Peste|Sub)\s+\d+[.,]?\d*\s+goluri)[^.]{0,80}?cot[aă]\s+([\d.,]+)",
+            re.I,
+        ),
+        re.compile(
+            r"([^,\n]{8,100}?)\s+[-–—]\s+([^,\n]{2,40}?)\s+[-–—]\s+"
+            r"(X2|GG[^,]*),\s*(?:cota|cotă)\s+([\d.,]+)",
+            re.I,
+        ),
+        re.compile(
+            r"(peste\s+\d+[.,]?\d*\s+goluri[^,\n]{0,50}),\s*cot[aă]\s+([\d.,]+)",
+            re.I,
+        ),
+        re.compile(
+            r"(.{20,180}?)\s+cot[aă]\s+(?:de\s+)?([\d.,]+)\s+la\s+",
+            re.I,
+        ),
+    ]
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for pat in patterns:
+        for m in pat.finditer(full_text):
+            if m.lastindex == 2:
+                pick, odds_s = m.group(1).strip(), m.group(2)
+            elif m.lastindex == 4:
+                pick = f"{m.group(1).strip()} – {m.group(2).strip()} – {m.group(3).strip()}"
+                odds_s = m.group(4)
+            else:
+                continue
+            pick = _clean_bet_pick(pick)
+            odds = parse_odds(odds_s)
+            key = (pick, str(odds) if odds else "")
+            if not pick or key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "bet_type": "1X2",
+                    "bet_pick": pick,
+                    "odds": odds,
+                    "is_main": len(out) == 0,
+                }
+            )
+    return out
+
+
+def _parse_bets(raw_bets: list, full_text: str = "") -> list[dict]:
     out: list[dict] = []
     seen: set[tuple[str, str]] = set()
     for b in raw_bets or []:
         raw_line = (b.get("raw") or b.get("bet_pick") or "").strip()
+        if not _is_valid_bet_line(raw_line):
+            continue
         pick = (b.get("bet_pick") or "").strip()
         if raw_line:
             m = _PONT_PICK_RE.match(raw_line)
             if m:
                 pick = m.group(1).strip()
             pick = _COTA_RE.sub("", pick).strip(" ,-")
+            pick = _clean_bet_pick(pick)
         odds = parse_odds(b.get("odds"))
         if not odds and raw_line:
             om = _COTA_RE.search(raw_line)
             if om:
                 odds = parse_odds(om.group(1))
-        key = (pick, str(odds) if odds else "")
-        if key in seen or (not pick and not odds):
+        if not odds:
+            continue
+        key = (pick, str(odds))
+        if key in seen or not pick:
             continue
         seen.add(key)
         out.append(
             {
                 "bet_type": b.get("bet_type") or "1X2",
-                "bet_pick": pick or raw_line,
+                "bet_pick": pick,
                 "odds": odds,
                 "is_main": b.get("is_main", len(out) == 0),
             }
         )
+    if len(out) < 1 and full_text:
+        out = _extract_bets_from_text(full_text)
+    elif full_text:
+        for extra in _extract_bets_from_text(full_text):
+            key = (extra["bet_pick"], str(extra.get("odds") or ""))
+            if key not in seen:
+                seen.add(key)
+                out.append(extra)
+    deduped: dict[str, dict] = {}
+    for b in out:
+        key = str(b.get("odds") or "")
+        prev = deduped.get(key)
+        if not prev or len(b.get("bet_pick") or "") > len(prev.get("bet_pick") or ""):
+            deduped[key] = b
+    out = list(deduped.values())
+    for i, b in enumerate(out):
+        b["is_main"] = i == 0
     return out
 
 
@@ -431,13 +598,21 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
     if not title:
         return None
 
+    content_html = raw.get("content_html") or ""
+    full_text = html_to_plain_text(clean_article_html(content_html))
+
     team_home, team_away = _resolve_teams(raw, url)
+    if not _is_valid_teams(team_home, team_away):
+        team_home, team_away = _teams_from_pick_lines(
+            [b.get("raw") or b.get("bet_pick") or "" for b in raw.get("bets") or []]
+        )
+        team_home, team_away = _fix_team_case(team_home), _fix_team_case(team_away)
+    if not _is_valid_teams(team_home, team_away):
+        team_home, team_away = _teams_from_pick_lines(_extract_bets_from_text(full_text))
+        team_home, team_away = _fix_team_case(team_home), _fix_team_case(team_away)
     if not _is_valid_teams(team_home, team_away):
         log.warning("Skip %s: invalid teams %r vs %r", url, team_home, team_away)
         return None
-
-    content_html = raw.get("content_html") or ""
-    full_text = html_to_plain_text(clean_article_html(content_html))
 
     match_date = _build_match_date(raw, full_text, url)
     if not match_date:
@@ -453,7 +628,7 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         log.warning("Skip %s: could not resolve sport", url)
         return None
 
-    bets = _parse_bets(raw.get("bets"))
+    bets = _parse_bets(raw.get("bets"), full_text)
     competition = _competition_from_h1(title)
 
     return {
