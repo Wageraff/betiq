@@ -25,6 +25,7 @@ STORAGE_TZ = ZoneInfo(MATCH_DATETIME_STORAGE_TZ)
 
 GEO_SOURCE_TZ: dict[str, str] = {
     "RO": "Europe/Bucharest",
+    "RU": "Europe/Moscow",
     "UK": "Europe/London",
     "DE": "Europe/Berlin",
 }

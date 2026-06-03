@@ -14,6 +14,47 @@ from src.scraper.utils.match_datetime import (
     to_storage_datetime,
 )
 
+RU_MONTHS = {
+    "января": 1,
+    "январь": 1,
+    "янв": 1,
+    "февраля": 2,
+    "февраль": 2,
+    "фев": 2,
+    "марта": 3,
+    "март": 3,
+    "мар": 3,
+    "апреля": 4,
+    "апрель": 4,
+    "апр": 4,
+    "мая": 5,
+    "май": 5,
+    "июня": 6,
+    "июнь": 6,
+    "июн": 6,
+    "iyunya": 6,
+    "iyune": 6,
+    "iyun": 6,
+    "июля": 7,
+    "июль": 7,
+    "июл": 7,
+    "августа": 8,
+    "август": 8,
+    "авг": 8,
+    "сентября": 9,
+    "сентябрь": 9,
+    "сен": 9,
+    "октября": 10,
+    "октябрь": 10,
+    "окт": 10,
+    "ноября": 11,
+    "ноябрь": 11,
+    "ноя": 11,
+    "декабря": 12,
+    "декабрь": 12,
+    "дек": 12,
+}
+
 RO_MONTHS = {
     "ianuarie": 1,
     "ian": 1,
@@ -40,19 +81,36 @@ RO_MONTHS = {
     "dec": 12,
 }
 
+def _months_for_geo(geo: Optional[str]) -> dict[str, int]:
+    if geo and geo.upper() == "RU":
+        merged = dict(RO_MONTHS)
+        merged.update(RU_MONTHS)
+        return merged
+    return RO_MONTHS
+
+
 SPORT_ALIASES = {
     "fotbal": "football",
+    "futbol": "football",
+    "футбол": "football",
     "football": "football",
     "soccer": "football",
     "tenis": "tennis",
     "tennis": "tennis",
+    "теннис": "tennis",
     "baschet": "basketball",
+    "basketbol": "basketball",
+    "баскетбол": "basketball",
     "basketball": "basketball",
     "handbal": "handball",
     "handball": "handball",
     "hochei": "hockey",
+    "hokkej": "hockey",
+    "хоккей": "hockey",
     "hockey": "hockey",
     "volei": "volleyball",
+    "volejbol": "volleyball",
+    "волейбол": "volleyball",
     "volleyball": "volleyball",
     "mma": "mma",
     "ufc": "mma",
@@ -86,20 +144,20 @@ def parse_odds(value: Union[str, float, int, Decimal, None]) -> Optional[Decimal
         return None
 
 
-def _parse_ro_date(text: str) -> Optional[date]:
+def _parse_named_month_date(text: str, months: dict[str, int]) -> Optional[date]:
     text = text.strip().lower()
-    month_pat = "|".join(sorted(RO_MONTHS.keys(), key=len, reverse=True))
+    month_pat = "|".join(sorted(months.keys(), key=len, reverse=True))
     m = re.search(rf"(\d{{1,2}})\s+({month_pat})\s+(\d{{4}})", text, re.I)
     if m:
         day, month_name, year = m.groups()
-        month = RO_MONTHS.get(month_name.lower())
+        month = months.get(month_name.lower())
         if month:
             return date(int(year), month, int(day))
 
     m = re.search(rf"({month_pat})\s+(\d{{1,2}}),?\s+(\d{{4}})", text, re.I)
     if m:
         month_name, day, year = m.groups()
-        month = RO_MONTHS.get(month_name.lower())
+        month = months.get(month_name.lower())
         if month:
             return date(int(year), month, int(day))
 
@@ -115,23 +173,27 @@ def _parse_ro_date(text: str) -> Optional[date]:
     return None
 
 
-def parse_date(raw: Optional[str]) -> Optional[datetime]:
+def _parse_ro_date(text: str, geo: Optional[str] = None) -> Optional[date]:
+    return _parse_named_month_date(text, _months_for_geo(geo))
+
+
+def parse_date(raw: Optional[str], *, geo: Optional[str] = None) -> Optional[datetime]:
     """Дата публикации / meta (возвращает aware UTC)."""
     if not raw:
         return None
     text = str(raw).strip()
-    schema = parse_schema_start_date(text)
+    schema = parse_schema_start_date(text, geo=geo)
     if schema:
         return schema
     if "T" in text or re.search(r"\d{4}-\d{2}-\d{2}", text):
         try:
             dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            return to_storage_datetime(dt)
+            return to_storage_datetime(dt, geo=geo)
         except ValueError:
             pass
-    d = _parse_ro_date(text)
+    d = _parse_named_month_date(text, _months_for_geo(geo))
     if d:
-        return default_kickoff_storage(d, hour=0, minute=0)
+        return default_kickoff_storage(d, hour=0, minute=0, geo=geo)
     return None
 
 
@@ -183,7 +245,8 @@ def parse_match_datetime(
         )
         return local.astimezone(STORAGE_TZ)
 
-    month_pat = "|".join(sorted(RO_MONTHS.keys(), key=len, reverse=True))
+    months = _months_for_geo(geo)
+    month_pat = "|".join(sorted(months.keys(), key=len, reverse=True))
     m = re.search(
         rf"(\d{{1,2}})\s+({month_pat})(?:\s+(\d{{4}}))?,?\s*(\d{{1,2}}):(\d{{2}})",
         text,
@@ -191,7 +254,7 @@ def parse_match_datetime(
     )
     if m:
         day_s, month_name, year_s, hour_s, minute_s = m.groups()
-        month = RO_MONTHS.get(month_name.lower())
+        month = months.get(month_name.lower())
         if month:
             year = int(year_s) if year_s else date.today().year
             local = datetime(
@@ -199,12 +262,12 @@ def parse_match_datetime(
             )
             return local.astimezone(STORAGE_TZ)
 
-    d = _parse_ro_date(text)
+    d = _parse_named_month_date(text, months)
     if d:
         return default_kickoff_storage(d, source_tz=source_tz, geo=geo)
 
     if url:
-        slug_d = parse_date_from_url(url)
+        slug_d = parse_date_from_url(url, geo=geo)
         if slug_d:
             return default_kickoff_storage(slug_d, source_tz=source_tz, geo=geo)
     return None
@@ -216,13 +279,14 @@ def is_upcoming_match(match_date: Optional[datetime], *, grace_hours: int = 6) -
     return _is_upcoming(match_date, grace_hours=grace_hours)
 
 
-def parse_date_from_url(url: str) -> Optional[date]:
-    """Извлечь дату из slug (29-martie-2026, 02-06-2026)."""
+def parse_date_from_url(url: str, *, geo: Optional[str] = None) -> Optional[date]:
+    """Извлечь дату из slug (29-martie-2026, 4-iyunya-2026, 02-06-2026)."""
     slug = url.rstrip("/").split("/")[-1].lower()
-    m = re.search(r"(\d{1,2})-(" + "|".join(RO_MONTHS.keys()) + r")-(\d{4})", slug)
+    months = _months_for_geo(geo)
+    m = re.search(r"(\d{1,2})-(" + "|".join(sorted(months.keys(), key=len, reverse=True)) + r")-(\d{4})", slug)
     if m:
         day, month_name, year = m.groups()
-        month = RO_MONTHS.get(month_name)
+        month = months.get(month_name)
         if month:
             return date(int(year), month, int(day))
     m = re.search(r"(\d{2})-(\d{2})-(\d{4})", slug)

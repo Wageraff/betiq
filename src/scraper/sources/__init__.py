@@ -8,6 +8,7 @@ SOURCE_MODULES = {
     "beturi": "src.scraper.sources.beturi",
     "pontulzilei": "src.scraper.sources.pontulzilei",
     "legalbet": "src.scraper.sources.legalbet",
+    "legalbet_ru": "src.scraper.sources.legalbet_ru",
 }
 
 
