@@ -12,6 +12,7 @@ SOURCE_MODULES = {
     "metaratings_ru": "src.scraper.sources.metaratings_ru",
     "vseprosport_ru": "src.scraper.sources.vseprosport_ru",
     "stavkiprognozy_ru": "src.scraper.sources.stavkiprognozy_ru",
+    "betonmobile_ru": "src.scraper.sources.betonmobile_ru",
 }
 
 

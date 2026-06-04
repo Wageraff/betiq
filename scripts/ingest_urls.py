@@ -54,6 +54,8 @@ _HOST_MODULE = {
     "www.vseprosport.ru": "vseprosport_ru",
     "stavkiprognozy.ru": "stavkiprognozy_ru",
     "www.stavkiprognozy.ru": "stavkiprognozy_ru",
+    "betonmobile.ru": "betonmobile_ru",
+    "www.betonmobile.ru": "betonmobile_ru",
     "beturi.ro": "beturi",
     "www.pontul-zilei.com": "pontulzilei",
     "pontul-zilei.com": "pontulzilei",
