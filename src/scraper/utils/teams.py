@@ -9,6 +9,7 @@ _TITLE_SUFFIX = re.compile(
     r"|\s+[—–]\s+(?:Ponturi|cele mai bune|pronostic|прогноз).*$"
     r"|\s+ponturi\s+pariuri.*$|\s+pronostic.*$|\s+pariuri\s+.*$"
     r"|\s+прогноз\s+на\s+.*$"
+    r"|\s+прогнозы\s+и\s+ставки.*$"
     r"|\s*\.\s+Ставка\s+.*$"
     r"|\s+ставка\s+с\s+коэффициентом\s+.*$",
     re.I,
@@ -16,14 +17,19 @@ _TITLE_SUFFIX = re.compile(
 
 # Разделитель только em/en dash (не дефис в фамилии Auger-Aliassime)
 _DASH_SPLIT = re.compile(r"\s+[—–]\s+")
+# Обычный дефис с пробелами (stavkiprognozy.ru: «Словения - Кипр»)
+_HYPHEN_SPLIT = re.compile(r"\s+-\s+")
 _VS_SPLIT = re.compile(r"\s+vs\s+", re.I)
 
 
 def parse_teams_from_title(title: str) -> tuple[str, str]:
-    """Команды из h1: «Georgia — România ponturi…» или «A vs B»."""
+    """Команды из h1: «Georgia — România ponturi…», «A vs B» или «A - B»."""
     clean = _TITLE_SUFFIX.sub("", (title or "").strip())
+    clean = re.sub(r"[«»]", "", clean)
     if not clean:
         return "", ""
+    if ":" in clean:
+        clean = clean.split(":", 1)[0].strip()
 
     if _VS_SPLIT.search(clean):
         parts = _VS_SPLIT.split(clean, maxsplit=1)
@@ -32,6 +38,11 @@ def parse_teams_from_title(title: str) -> tuple[str, str]:
 
     if _DASH_SPLIT.search(clean):
         parts = _DASH_SPLIT.split(clean, maxsplit=1)
+        if len(parts) == 2:
+            return parts[0].strip(), _trim_away(parts[1])
+
+    if _HYPHEN_SPLIT.search(clean):
+        parts = _HYPHEN_SPLIT.split(clean, maxsplit=1)
         if len(parts) == 2:
             return parts[0].strip(), _trim_away(parts[1])
 
@@ -66,6 +77,7 @@ def _trim_away(away: str) -> str:
     away = away.strip()
     away = re.sub(r"\s*:\s*прогноз.*$", "", away, flags=re.I)
     away = re.sub(r"\s+прогноз\s+на\s+.*$", "", away, flags=re.I)
+    away = re.sub(r"\s+прогнозы\s+и\s+ставки.*$", "", away, flags=re.I)
     away = re.sub(r"\s+ставка\s+.*$", "", away, flags=re.I)
     away = re.sub(r"\s+с\s+коэффициентом\s+.*$", "", away, flags=re.I)
     away = re.sub(r"\s+\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}.*$", "", away)

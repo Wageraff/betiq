@@ -115,10 +115,50 @@ _PARSE_JS = """
     return null;
   };
 
-  const entityName = (t) => {
+  const ldNodes = [];
+  const collectLdNodes = (obj) => {
+    if (!obj) return;
+    if (Array.isArray(obj)) {
+      obj.forEach(collectLdNodes);
+      return;
+    }
+    ldNodes.push(obj);
+    if (obj['@graph']) collectLdNodes(obj['@graph']);
+  };
+
+  const ldById = () => {
+    const m = new Map();
+    for (const n of ldNodes) {
+      if (n && n['@id']) m.set(n['@id'], n);
+    }
+    return m;
+  };
+
+  const teamName = (t, byId) => {
     if (!t) return '';
-    if (typeof t === 'string') return t.trim();
-    return (t.name || '').trim();
+    if (typeof t === 'string') {
+      const node = byId && byId.get(t);
+      return node ? (node.name || '').trim() : t.trim();
+    }
+    if (Array.isArray(t)) {
+      for (const item of t) {
+        const n = teamName(item, byId);
+        if (n) return n;
+      }
+      return '';
+    }
+    return (t.name || teamName(t['@id'], byId) || '').trim();
+  };
+
+  const entityName = (t) => teamName(t, null);
+
+  const teamsFromLine = (line) => {
+    const t = (line || '').trim().replace(/[«»"']/g, '').replace(/\\s+/g, ' ');
+    if (!t) return null;
+    const head = t.split(':')[0].trim();
+    const m = head.match(/^(.+?)\\s+-\\s+(.+)$/);
+    if (!m) return null;
+    return { home: m[1].trim(), away: m[2].trim() };
   };
 
   const personName = (author) => {
@@ -140,10 +180,12 @@ _PARSE_JS = """
   for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
     try {
       const data = JSON.parse(script.textContent || '');
+      collectLdNodes(data);
       if (!event) event = findByType(data, 'SportsEvent');
       if (!article) article = findByType(data, 'NewsArticle');
     } catch (e) {}
   }
+  const byId = ldById();
 
   let team_home = '';
   let team_away = '';
@@ -155,14 +197,23 @@ _PARSE_JS = """
   if (event) {
     kickoff = event.startDate || '';
     sport = event.sport || '';
-    team_home = entityName(event.homeTeam);
-    team_away = entityName(event.awayTeam);
+    team_home = teamName(event.homeTeam, byId);
+    team_away = teamName(event.awayTeam, byId);
     if (!team_home && Array.isArray(event.competitor) && event.competitor.length >= 2) {
-      team_home = entityName(event.competitor[0]);
-      team_away = entityName(event.competitor[1]);
+      team_home = teamName(event.competitor[0], byId);
+      team_away = teamName(event.competitor[1], byId);
     }
-    location = entityName(event.location);
+    location = teamName(event.location, byId) || entityName(event.location);
     competition = (event.name || '').trim();
+  }
+
+  if (!team_home) {
+    team_home = document.querySelector('[itemprop="homeTeam"] meta[itemprop="name"]')?.getAttribute('content')
+      || document.querySelector('[itemprop="homeTeam"]')?.textContent?.trim() || '';
+  }
+  if (!team_away) {
+    team_away = document.querySelector('[itemprop="awayTeam"] meta[itemprop="name"]')?.getAttribute('content')
+      || document.querySelector('[itemprop="awayTeam"]')?.textContent?.trim() || '';
   }
 
   let author = '';
@@ -183,18 +234,43 @@ _PARSE_JS = """
   );
   if (topbarInner) {
     const divs = [...topbarInner.querySelectorAll(':scope > div')];
+    for (const div of divs) {
+      if (!team_home || !team_away) {
+        const pair = teamsFromLine(div.innerText);
+        if (pair) {
+          team_home = team_home || pair.home;
+          team_away = team_away || pair.away;
+        }
+      }
+    }
     const last = divs[divs.length - 1];
     if (last) {
       const t = (last.innerText || '').trim().replace(/\\s+/g, ' ');
-      if (t) competition = t;
+      if (t && !/\\s+-\\s+/.test(t)) competition = t;
+      else if (t && !competition) competition = t;
     }
   }
 
-  const h1 = document.querySelector('h1')?.innerText?.trim() || headline || '';
   const meta = {
     title: getMeta('meta[property="og:title"]') || document.title || '',
     description: getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]'),
   };
+
+  const h1 = document.querySelector('h1')?.innerText?.trim() || headline || '';
+  if ((!team_home || !team_away) && h1) {
+    const pair = teamsFromLine(h1);
+    if (pair) {
+      team_home = team_home || pair.home;
+      team_away = team_away || pair.away;
+    }
+  }
+  if ((!team_home || !team_away) && meta.title) {
+    const pair = teamsFromLine(meta.title);
+    if (pair) {
+      team_home = team_home || pair.home;
+      team_away = team_away || pair.away;
+    }
+  }
 
   const SKIP_IDS = ['fc-coeffs', 'fc-private-matches', 'last-matches', 'fc-live'];
   const shouldSkipGroup = (fg) => {
