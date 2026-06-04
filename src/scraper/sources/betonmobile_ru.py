@@ -174,50 +174,36 @@ _PARSE_JS = """
     betsDom.push({ pick, odds });
   };
 
-  const coeffFromContext = (pickEl) => {
-    const row = pickEl.closest('[class*="stavka"]') || pickEl.parentElement;
-    const coeffEl = row?.querySelector(
-      '.s_p_n_stavka_k, .s-p-n-stavka-k, [class*="stavka_k"], [class*="stavka-k"], [class*="stavka_kf"], [class*="coeff"], [class*="koef"], [class*="kf"]'
-    );
-    if (coeffEl) return coeffEl.textContent || '';
-    let sib = pickEl.nextElementSibling;
-    for (let i = 0; i < 3 && sib; i++) {
-      const t = (sib.textContent || '').trim();
+  const stavkaRow = (el) => {
+    let node = el;
+    while (node) {
+      if (node.classList && node.classList.contains('s_p_n_stavka')) return node;
+      node = node.parentElement;
+    }
+    return null;
+  };
+
+  const coeffFromRow = (row) => {
+    if (!row) return '';
+    const coeffEl = row.querySelector('.s_p_n_stavka_k');
+    if (coeffEl) return coeffEl.innerText || coeffEl.textContent || '';
+    let sib = row.querySelector('.s_p_n_stavka_t')?.nextElementSibling;
+    for (let i = 0; i < 4 && sib; i++) {
+      const t = (sib.innerText || sib.textContent || '').trim();
       if (/^\\d{1,2}[.,]\\d{2}$/.test(t)) return t;
       sib = sib.nextElementSibling;
     }
-    const rowText = (row?.innerText || '').replace(/\\s+/g, ' ');
-    const rm = rowText.match(/([\\d]{1,2}[.,][\\d]{2})\\s*$/);
+    const rm = (row.innerText || '').replace(/\\s+/g, ' ').match(/([\\d]{1,2}[.,][\\d]{2})\\s*$/);
     return rm ? rm[1] : '';
   };
 
-  const pickSelectors = [
-    '.s_p_n_stavka_t', '.s-p-n-stavka-t',
-    '[class*="stavka_t"]', '[class*="stavka-t"]',
-  ].join(', ');
-  document.querySelectorAll(pickSelectors).forEach((pickEl) => {
-    pushBet(pickEl.textContent, coeffFromContext(pickEl));
+  document.querySelectorAll('.s_p_n_stavka').forEach((row) => {
+    if (row.closest('.s_p_n_k_t_stavka, .odd_name')) return;
+    const pickEl = row.querySelector('.s_p_n_stavka_t');
+    if (!pickEl) return;
+    const pick = (pickEl.innerText || pickEl.textContent || '').trim();
+    pushBet(pick, coeffFromRow(row));
   });
-
-  document.querySelectorAll(
-    '.s_p_n_stavka, .s-p-n-stavka, [class*="s_p_n_stavka"], [class*="s-p-n-stavka"]'
-  ).forEach((row) => {
-    if (row.matches(pickSelectors)) return;
-    const pickEl = row.querySelector(pickSelectors);
-    if (pickEl) pushBet(pickEl.textContent, coeffFromContext(pickEl));
-    else {
-      const raw = (row.innerText || '').trim().replace(/\\s+/g, ' ');
-      const m = raw.match(/^(.+?)\\s+([\\d]{1,2}[.,][\\d]{2})$/);
-      if (m) pushBet(m[1], m[2]);
-    }
-  });
-
-  const headerBox = document.querySelector('.s_p_n_h_b, [class*="s_p_n_h_b"]');
-  if (headerBox) {
-    headerBox.querySelectorAll(pickSelectors).forEach((pickEl) => {
-      pushBet(pickEl.textContent, coeffFromContext(pickEl));
-    });
-  }
 
   if (!betsDom.length && domText) {
     const nash = domText.match(/наш\\s+выбор\\s*[—–-]\\s*(.+?)\\s+за\\s+([\\d.,]{3,5})/i);
