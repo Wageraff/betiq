@@ -9,6 +9,7 @@ SOURCE_MODULES = {
     "pontulzilei": "src.scraper.sources.pontulzilei",
     "legalbet": "src.scraper.sources.legalbet",
     "legalbet_ru": "src.scraper.sources.legalbet_ru",
+    "metaratings_ru": "src.scraper.sources.metaratings_ru",
 }
 
 

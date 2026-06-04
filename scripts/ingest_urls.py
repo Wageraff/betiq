@@ -48,6 +48,8 @@ FRANCE_IVORY_URLS = [
 _HOST_MODULE = {
     "legalbet.ro": "legalbet",
     "legalbet.ru": "legalbet_ru",
+    "metaratings.ru": "metaratings_ru",
+    "www.metaratings.ru": "metaratings_ru",
     "beturi.ro": "beturi",
     "www.pontul-zilei.com": "pontulzilei",
     "pontul-zilei.com": "pontulzilei",
