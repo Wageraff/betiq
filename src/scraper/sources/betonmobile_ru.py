@@ -154,11 +154,19 @@ _PARSE_JS = """
 
   const betsDom = [];
   const seenBet = new Set();
+  const isNoisePick = (pick) => {
+    if (!pick || pick.length < 3 || pick.length > 100) return true;
+    if (/^[\d.,]+\\s/.test(pick) || /^\\d+\\)\\s/.test(pick)) return true;
+    if (/прогноз\\s+и\\s+ставк|наш\\s+выбор.*\\s+за\\s/i.test(pick)) return true;
+    if ((pick.match(/\\./g) || []).length > 2) return true;
+    return false;
+  };
   const pushBet = (pick, odds) => {
     pick = (pick || '').trim().replace(/\\s+/g, ' ');
+    pick = pick.replace(/^[\d.,]+\\s+/, '').replace(/\\s+@\\s*[\\d.,]+\\s*$/, '').trim();
     odds = (odds || '').trim();
-    const om = odds.match(/(\\d{1,2}[.,]\\d{2})/);
-    if (!pick || !om || pick.length > 100 || pick.length < 3) return;
+    const om = (odds.match(/(\\d{1,2}[.,]\\d{2})/) || pick.match(/\\s([\\d]{1,2}[.,][\\d]{2})\\s*$/));
+    if (!pick || !om || isNoisePick(pick)) return;
     odds = om[1];
     const key = pick + '|' + odds;
     if (seenBet.has(key)) return;
@@ -166,13 +174,70 @@ _PARSE_JS = """
     betsDom.push({ pick, odds });
   };
 
-  document.querySelectorAll('.s_p_n_stavka_t').forEach((pickEl) => {
+  const coeffFromContext = (pickEl) => {
     const row = pickEl.closest('[class*="stavka"]') || pickEl.parentElement;
-    const coeffEl = row?.querySelector('.s_p_n_stavka_k')
-      || pickEl.parentElement?.querySelector('.s_p_n_stavka_k')
-      || pickEl.nextElementSibling;
-    pushBet(pickEl.textContent, coeffEl ? coeffEl.textContent : '');
+    const coeffEl = row?.querySelector(
+      '.s_p_n_stavka_k, .s-p-n-stavka-k, [class*="stavka_k"], [class*="stavka-k"], [class*="stavka_kf"], [class*="coeff"], [class*="koef"], [class*="kf"]'
+    );
+    if (coeffEl) return coeffEl.textContent || '';
+    let sib = pickEl.nextElementSibling;
+    for (let i = 0; i < 3 && sib; i++) {
+      const t = (sib.textContent || '').trim();
+      if (/^\\d{1,2}[.,]\\d{2}$/.test(t)) return t;
+      sib = sib.nextElementSibling;
+    }
+    const rowText = (row?.innerText || '').replace(/\\s+/g, ' ');
+    const rm = rowText.match(/([\\d]{1,2}[.,][\\d]{2})\\s*$/);
+    return rm ? rm[1] : '';
+  };
+
+  const pickSelectors = [
+    '.s_p_n_stavka_t', '.s-p-n-stavka-t',
+    '[class*="stavka_t"]', '[class*="stavka-t"]',
+  ].join(', ');
+  document.querySelectorAll(pickSelectors).forEach((pickEl) => {
+    pushBet(pickEl.textContent, coeffFromContext(pickEl));
   });
+
+  document.querySelectorAll(
+    '.s_p_n_stavka, .s-p-n-stavka, [class*="s_p_n_stavka"], [class*="s-p-n-stavka"]'
+  ).forEach((row) => {
+    if (row.matches(pickSelectors)) return;
+    const pickEl = row.querySelector(pickSelectors);
+    if (pickEl) pushBet(pickEl.textContent, coeffFromContext(pickEl));
+    else {
+      const raw = (row.innerText || '').trim().replace(/\\s+/g, ' ');
+      const m = raw.match(/^(.+?)\\s+([\\d]{1,2}[.,][\\d]{2})$/);
+      if (m) pushBet(m[1], m[2]);
+    }
+  });
+
+  const headerBox = document.querySelector('.s_p_n_h_b, [class*="s_p_n_h_b"]');
+  if (headerBox) {
+    headerBox.querySelectorAll(pickSelectors).forEach((pickEl) => {
+      pushBet(pickEl.textContent, coeffFromContext(pickEl));
+    });
+  }
+
+  if (!betsDom.length && domText) {
+    const nash = domText.match(/наш\\s+выбор\\s*[—–-]\\s*(.+?)\\s+за\\s+([\\d.,]{3,5})/i);
+    if (nash) pushBet(nash[1], nash[2]);
+    for (const line of domText.split(/\\n+/)) {
+      const t = line.trim();
+      if (!t || t.length > 110) continue;
+      let m = t.match(/^(.{4,90}?)\\s+за\\s+([\\d]{1,2}[.,][\\d]{2})\\s*$/i);
+      if (m) pushBet(m[1], m[2]);
+    }
+  }
+
+  const betDebug = {
+    stavka_t: document.querySelectorAll('.s_p_n_stavka_t').length,
+    stavka_k: document.querySelectorAll('.s_p_n_stavka_k').length,
+    stavka_any: document.querySelectorAll('[class*="stavka"]').length,
+    sampleClasses: [...document.querySelectorAll('[class*="stavka"]')]
+      .slice(0, 6)
+      .map((e) => e.className),
+  };
 
   const datePublished = getMeta('meta[property="article:published_time"]')
     || document.querySelector('time[datetime]')?.getAttribute('datetime')
@@ -189,10 +254,26 @@ _PARSE_JS = """
     domText,
     content_html,
     betsDom,
+    betDebug,
     datePublished,
   };
 }
 """
+
+_SPAN_BET = re.compile(r"\{([^}]+)\}\s*за\s*\{([\d.,]+)\}", re.I)
+_LINE_ZA = re.compile(
+    r"^(.{4,90}?)\s+за\s+(\d{1,2}[.,]\d{2})\s*$",
+    re.I | re.M,
+)
+_NAASH_VYBOR = re.compile(
+    r"наш\s+выбор\s*[—–-]\s*(.+?)\s+за\s+(\d{1,2}[.,]\d{2})",
+    re.I,
+)
+_BET_WORD = re.compile(
+    r"тотал|фора|победа|обе|забьют|ничья|индивидуальный|\bит\b|"
+    r"меньше|больше|голов|гейм|сет|тайм|четверт|половин|тб\b|тм\b",
+    re.I,
+)
 
 _PATH_SPORT = [
     (re.compile(r"prognozy-na-tennis|tennis", re.I), "tennis"),
@@ -272,11 +353,17 @@ def _build_match_date(raw: dict, url: str) -> Optional[datetime]:
 
 def _clean_bet_pick(pick: str) -> str:
     pick = (pick or "").strip()
+    pick = re.sub(r"^[\d.,]+\s+", "", pick)
+    pick = re.sub(r"\s+@\s*[\d.,]+\s*$", "", pick)
     pick = re.sub(r"\s+", " ", pick)
     pick = pick.strip(" ,-«»\"'")
     if len(pick) < 3 or len(pick) > 100:
         return ""
     if re.search(r"^(?:коэффициент|ставка|букмекер|прогноз)\b", pick, re.I):
+        return ""
+    if re.search(r"прогноз\s+и\s+ставк|наш\s+выбор.*\s+за\s", pick, re.I):
+        return ""
+    if pick.count(".") > 2:
         return ""
     return pick
 
@@ -305,18 +392,44 @@ def _dedupe_bets(bets: list[dict]) -> list[dict]:
     return kept
 
 
-def _parse_bets(bets_dom: list[dict]) -> list[dict]:
+def _bets_from_full_text(full_text: str) -> list[tuple[str, str]]:
+    if not full_text:
+        return []
+    found: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(pick: str, odds: str) -> None:
+        pick = _clean_bet_pick(pick)
+        if not pick or not _BET_WORD.search(pick):
+            return
+        key = _bet_pick_key(pick, odds)
+        if key in seen:
+            return
+        seen.add(key)
+        found.append((pick, odds))
+
+    for m in _NAASH_VYBOR.finditer(full_text):
+        add(m.group(1), m.group(2))
+    for m in _SPAN_BET.finditer(full_text):
+        add(m.group(1), m.group(2))
+    for m in _LINE_ZA.finditer(full_text):
+        add(m.group(1), m.group(2))
+
+    return found
+
+
+def _parse_bets(bets_dom: list[dict], full_text: str = "") -> list[dict]:
     out: list[dict] = []
     seen: set[str] = set()
 
-    for item in bets_dom or []:
-        pick = _clean_bet_pick(item.get("pick") or "")
-        odds = parse_odds(item.get("odds") or "")
+    def add(pick: str, odds_raw: str) -> None:
+        pick = _clean_bet_pick(pick)
+        odds = parse_odds(odds_raw)
         if not pick or odds is None:
-            continue
+            return
         key = _bet_pick_key(pick, str(odds))
         if key in seen:
-            continue
+            return
         seen.add(key)
         out.append(
             {
@@ -326,6 +439,13 @@ def _parse_bets(bets_dom: list[dict]) -> list[dict]:
                 "is_main": len(out) == 0,
             }
         )
+
+    for item in bets_dom or []:
+        add(item.get("pick") or "", item.get("odds") or "")
+
+    if len(out) < 2:
+        for pick, odds_raw in _bets_from_full_text(full_text):
+            add(pick, odds_raw)
 
     return _dedupe_bets(out)
 
@@ -389,7 +509,7 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
     await wait_cloudflare(page)
     try:
         await page.wait_for_selector(
-            ".s_p_n_h_b_title, .s_p_n_stavka_t",
+            ".s_p_n_h_b_title, .s_p_n_stavka_t, [class*='stavka']",
             timeout=20_000,
             state="attached",
         )
@@ -432,9 +552,15 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
 
     competition = (raw.get("competition") or "").strip()
 
-    bets = _parse_bets(raw.get("betsDom") or [])
+    bets = _parse_bets(raw.get("betsDom") or [], full_text)
     if not bets:
-        log.info("Skip %s: no bets with odds", url)
+        dbg = raw.get("betDebug") or {}
+        log.info(
+            "Skip %s: no bets with odds (dom=%s debug=%s)",
+            url,
+            len(raw.get("betsDom") or []),
+            dbg,
+        )
         return None
 
     author = (raw.get("author") or "").strip()
@@ -481,6 +607,17 @@ async def run_test_parse(urls: Optional[list[tuple[str, str]]] = None) -> None:
                     data = await parse_prediction(page, url)
                     if not data:
                         print("  SKIP/FAIL")
+                        dbg = await page.evaluate(
+                            """() => ({
+                              stavka_t: document.querySelectorAll('.s_p_n_stavka_t').length,
+                              stavka_k: document.querySelectorAll('.s_p_n_stavka_k').length,
+                              stavka_any: document.querySelectorAll('[class*="stavka"]').length,
+                              samples: [...document.querySelectorAll('[class*="stavka"]')]
+                                .slice(0, 4).map(e => e.className),
+                            })"""
+                        )
+                        if dbg:
+                            print(f"  debug:      {dbg}")
                         continue
                     ok = data["sport"] == expected_sport
                     print(f"  teams:      {data['team_home']} vs {data['team_away']}")
