@@ -370,6 +370,18 @@ _TEXT_BET = re.compile(
 )
 _KF_SLUG = re.compile(r"kf-(\d)-(\d{2})(?:-|$)", re.I)
 
+# Вступление эксперта: «… предлагает свой прогноз на … матч …»
+_VPS_INTRO_PREFIX = re.compile(
+    r"^[\s\S]{0,500}?предлагает\s+(?:свой\s+)?прогноз\s+на\s+[^.!?\n]+[.!?]\s*",
+    re.I,
+)
+_VPS_INTRO_LINE = re.compile(
+    r"(?:основатель\s+сайта|всепроспорт|vseprosport).{0,120}?предлагает\s+"
+    r"(?:свой\s+)?прогноз|"
+    r"предлагает\s+(?:свой\s+)?прогноз\s+на\s+",
+    re.I,
+)
+
 _SLUG_SPORT_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"nhl|hokkej|hockey", re.I), "hockey"),
     (re.compile(r"prosteev|rolan|atp|wta|tennis", re.I), "tennis"),
@@ -514,6 +526,22 @@ def _build_match_date(raw: dict, url: str) -> Optional[datetime]:
     return default_kickoff_storage(d, geo=geo) if d else None
 
 
+def _strip_vps_intro(text: str) -> str:
+    """Убирает шаблонное вступление эксперта в начале текста прогноза."""
+    if not text:
+        return text
+    t = _VPS_INTRO_PREFIX.sub("", text, count=1).strip()
+    lines: list[str] = []
+    for line in t.splitlines():
+        s = line.strip()
+        if s and _VPS_INTRO_LINE.search(s) and len(s) < 280:
+            continue
+        lines.append(line)
+    t = "\n".join(lines)
+    t = re.sub(r"\n{3,}", "\n\n", t).strip()
+    return t
+
+
 def _clean_bet_pick(pick: str) -> str:
     pick = (pick or "").strip()
     pick = _BET_PICK_NOISE.sub("", pick)
@@ -521,6 +549,7 @@ def _clean_bet_pick(pick: str) -> str:
     pick = re.sub(r"^прогноз\s*", "", pick, flags=re.I)
     pick = re.sub(r"\s*@\s*[\d.,]+\s*$", "", pick)
     pick = re.sub(r"\s+за\s*[\d.,]+\s*$", "", pick, flags=re.I)
+    pick = re.sub(r"\s+за\s*$", "", pick, flags=re.I)
     pick = re.sub(r"\s+", " ", pick).strip(" ,-«»\"'@")
     if pick.count("«") > pick.count("»"):
         pick = pick + "»"
@@ -585,6 +614,33 @@ def _bets_from_slug_kf(
     return []
 
 
+def _bet_pick_key(pick: str, odds: str) -> str:
+    """Ключ для дедупа: «мячей»/«голов», кавычки, хвост «за»."""
+    p = pick.lower()
+    p = re.sub(r"\s+за\s*$", "", p)
+    p = re.sub(r"мячей", "голов", p)
+    p = re.sub(r"[«»\"']", "", p)
+    p = re.sub(r"\s+", " ", p).strip()
+    return f"{p}|{odds}"
+
+
+def _dedupe_bets(bets: list[dict]) -> list[dict]:
+    kept: list[dict] = []
+    keys: list[str] = []
+    for b in bets:
+        key = _bet_pick_key(b["bet_pick"], str(b["odds"]))
+        if key in keys:
+            idx = keys.index(key)
+            if len(b["bet_pick"]) > len(kept[idx]["bet_pick"]):
+                kept[idx] = b
+            continue
+        keys.append(key)
+        kept.append(b)
+    for i, b in enumerate(kept):
+        b["is_main"] = i == 0
+    return kept
+
+
 def _parse_bets(
     bets_dom: list[dict],
     bet_lines: list[str],
@@ -594,14 +650,14 @@ def _parse_bets(
     team_away: str = "",
 ) -> list[dict]:
     out: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[str] = set()
 
     def add(pick: str, odds_raw: str) -> None:
         pick = _clean_bet_pick(pick)
         odds = parse_odds(odds_raw)
         if not pick or odds is None:
             return
-        key = (pick, str(odds))
+        key = _bet_pick_key(pick, str(odds))
         if key in seen:
             return
         seen.add(key)
@@ -643,7 +699,7 @@ def _parse_bets(
         ):
             add(pick, odds_raw)
 
-    return out
+    return _dedupe_bets(out)
 
 
 def _resolve_sport(raw: dict, url: str) -> str:
@@ -726,6 +782,8 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
     else:
         full_text = html_to_plain_text(clean_article_html(content_html))
         text_source = "workarea-html"
+
+    full_text = _strip_vps_intro(full_text)
 
     sport = _resolve_sport(raw, url)
     if not sport:
