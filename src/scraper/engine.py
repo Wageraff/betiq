@@ -10,7 +10,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import delete, select, update
@@ -23,6 +23,7 @@ from src.scraper.sources import load_source_module
 from src.scraper.utils.browser import (
     browser_lifecycle,
     ensure_proxy_configured,
+    get_proxy_pool,
     is_proxy_error,
     page_session,
     report_proxy_failure,
@@ -36,7 +37,8 @@ from src.scraper.utils.alerter import (
 )
 from src.scraper.utils.match_key import find_or_create_match
 from src.scraper.utils.match_datetime import to_storage_datetime
-from src.scraper.utils.normalizer import is_upcoming_match, parse_date_from_url
+from src.scraper.utils.normalizer import is_upcoming_match
+from src.scraper.utils.url_filter import filter_scrape_urls
 from src.scraper.utils import url_list_cache
 
 log = logging.getLogger("engine")
@@ -71,14 +73,23 @@ def _snap_source(source: Source) -> SourceSnap:
     )
 
 
-def _url_within_age(url: str, max_days: int) -> bool:
-    """Статья не старше max_days и день матча в slug — сегодня или позже."""
-    d = parse_date_from_url(url)
-    if not d:
-        return True
-    if d < date.today():
-        return False
-    return d <= date.today() + timedelta(days=max_days)
+def _filter_urls_for_scrape(
+    raw: list[str],
+    *,
+    max_days: int,
+    geo: str,
+    source_name: str,
+) -> list[str]:
+    filtered = filter_scrape_urls(raw, max_days=max_days, geo=geo)
+    skipped = len(raw) - len(filtered)
+    if skipped:
+        log.info(
+            "%s: skip %s URLs (no date in slug / past match day / beyond %sd)",
+            source_name,
+            skipped,
+            max_days,
+        )
+    return filtered
 
 
 async def _existing_urls(session: AsyncSession, urls: list[str]) -> set[str]:
@@ -190,11 +201,16 @@ async def scrape_source(
                     return collected
 
                 max_age = settings.scrape_articles_max_age_days
+                geo = snap.geo
+                proxy_pool = get_proxy_pool()
+                consecutive_proxy_errors = 0
 
                 def _new_urls_to_parse(
                     raw: list[str], known: set[str]
                 ) -> list[str]:
-                    filtered = [u for u in raw if _url_within_age(u, max_age)]
+                    filtered = _filter_urls_for_scrape(
+                        raw, max_days=max_age, geo=geo, source_name=snap.name
+                    )
                     if force:
                         return filtered
                     return [u for u in filtered if u not in known]
@@ -203,9 +219,12 @@ async def scrape_source(
                 items_found = len(urls)
 
                 if force:
-                    await _delete_predictions_by_urls(session, urls)
+                    scrapeable = _filter_urls_for_scrape(
+                        urls, max_days=max_age, geo=geo, source_name=snap.name
+                    )
+                    await _delete_predictions_by_urls(session, scrapeable)
                     await session.commit()
-                    log.info("%s: force re-scrape for %s URLs", snap.name, len(urls))
+                    log.info("%s: force re-scrape for %s URLs", snap.name, len(scrapeable))
 
                 known_urls = (
                     set() if force else await _existing_urls(session, urls)
@@ -222,8 +241,8 @@ async def scrape_source(
                     to_parse = _new_urls_to_parse(urls, known_urls)
 
                 if not force:
-                    aged = [u for u in urls if _url_within_age(u, max_age)]
-                    db_skip = len(aged) - len(to_parse)
+                    scrapeable = filter_scrape_urls(urls, max_days=max_age, geo=geo)
+                    db_skip = len(scrapeable) - len(to_parse)
                     if db_skip:
                         log.info(
                             "%s: skip %s URLs already in DB",
@@ -241,12 +260,39 @@ async def scrape_source(
                     for attempt in range(2):
                         try:
                             parsed = await module.parse_prediction(page, url)
+                            consecutive_proxy_errors = 0
                             break
                         except Exception as e:
-                            report_proxy_failure(e, proxy)
-                            if attempt == 0 and is_proxy_error(e):
-                                log.warning("Proxy error, retry: %s", url)
-                                continue
+                            if is_proxy_error(e):
+                                report_proxy_failure(e, proxy)
+                                consecutive_proxy_errors += 1
+                                wait_sec = proxy_pool.seconds_until_available()
+                                if wait_sec > 0:
+                                    pause = min(wait_sec, 120.0)
+                                    log.warning(
+                                        "%s: proxies cooling down %.0fs",
+                                        snap.name,
+                                        pause,
+                                    )
+                                    await asyncio.sleep(pause)
+                                elif (
+                                    consecutive_proxy_errors
+                                    >= settings.scrape_proxy_error_burst
+                                ):
+                                    pause = settings.scrape_proxy_error_cooldown_sec
+                                    log.warning(
+                                        "%s: %s proxy errors in a row, pause %.0fs",
+                                        snap.name,
+                                        consecutive_proxy_errors,
+                                        pause,
+                                    )
+                                    await asyncio.sleep(pause)
+                                    consecutive_proxy_errors = 0
+                                if attempt == 0:
+                                    log.warning("Proxy error, retry: %s", url)
+                                    continue
+                            else:
+                                report_proxy_failure(e, proxy)
                             log.error("Failed %s: %s", url, e)
                             break
 

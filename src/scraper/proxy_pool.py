@@ -75,6 +75,19 @@ class ProxyPool:
             and pa.password == pb.password
         )
 
+    def seconds_until_available(self) -> float:
+        """Секунды до разбана хотя бы одного прокси (0 — есть доступный сейчас)."""
+        with self._lock:
+            if not self._proxies:
+                return 0.0
+            now = time.time()
+            available = [p for p in self._proxies if self._banned.get(p, 0) <= now]
+            if available:
+                return 0.0
+            if not self._banned:
+                return 0.0
+            return max(0.0, min(self._banned.values()) - now)
+
     def report_failure(self, proxy: str) -> None:
         if not proxy:
             return

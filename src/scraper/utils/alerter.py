@@ -74,12 +74,15 @@ async def alert_scrape_error(
     *,
     last_success_at: Optional[datetime] = None,
 ) -> None:
+    last_ok = last_success_at
+    if last_ok is None:
+        last_ok = getattr(source, "last_success_at", None)
     text = (
         f"🔴 <b>SCRAPE ERROR</b>\n"
         f"Source: {source.name}\n"
         f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC\n"
         f"Error: {error_msg[:500]}\n"
-        f"Last success: {_ago(last_success_at or source.last_success_at)}"
+        f"Last success: {_ago(last_ok)}"
     )
     await send_message(text, reply_markup=scrape_error_keyboard(source.id))
 

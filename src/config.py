@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     scrape_delay_max: float = float(_scraper.get("max_delay", fallback=5.0))
     scrape_max_retries: int = int(_scraper.get("max_retries", fallback=3))
     scrape_articles_max_age_days: int = int(_scraper.get("articles_max_age_days", fallback=7))
+    # Пауза после серии ошибок прокси подряд (сек)
+    scrape_proxy_error_cooldown_sec: float = float(
+        _scraper.get("proxy_error_cooldown_sec", fallback=60)
+    )
+    scrape_proxy_error_burst: int = int(_scraper.get("proxy_error_burst", fallback=5))
     # Кэш URL с листингов (мин); 25 ≈ между quick scrape 30m. 0 = выкл.
     scrape_url_list_cache_ttl_minutes: int = int(
         _scraper.get("url_list_cache_ttl_minutes", fallback=25)

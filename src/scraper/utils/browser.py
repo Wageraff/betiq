@@ -93,6 +93,10 @@ def report_proxy_failure(exc: BaseException, proxy: Optional[str]) -> None:
         _proxy_pool.report_failure(proxy)
 
 
+def get_proxy_pool() -> ProxyPool:
+    return _proxy_pool
+
+
 def _resolve_geo(geo: Optional[str]) -> Optional[str]:
     if geo:
         return geo.strip().upper()
