@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Optional
 
-from src.scraper.utils.normalizer import parse_date_from_url
+from src.scraper.utils.url_dates import parse_date_from_url
 
 
 def is_scrapeable_article_url(

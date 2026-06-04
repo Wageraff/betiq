@@ -1,10 +1,20 @@
-"""Фильтр URL перед парсингом статей."""
+"""
+Фильтр URL перед парсингом статей.
+
+Запуск на сервере (из /opt/betiq):
+  export PYTHONPATH=/opt/betiq
+  ./venv/bin/python3.11 -m unittest tests.test_scrape_url_filter -v
+"""
 from __future__ import annotations
 
+import sys
 import unittest
-from datetime import date, timedelta
-from unittest.mock import patch
+from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from datetime import date, timedelta
 from src.scraper.utils.url_filter import filter_scrape_urls, is_scrapeable_article_url
 
 
@@ -47,9 +57,7 @@ class ScrapeUrlFilterTests(unittest.TestCase):
             f"https://legalbet.ru/ponturi/b-ponturi-pariuri-{past_slug}-x/",
             "https://legalbet.ru/ponturi/no-date/",
         ]
-        with patch("src.scraper.utils.url_filter.date") as mock_date:
-            mock_date.today.return_value = date.today()
-            out = filter_scrape_urls(urls, max_days=7, geo="RU")
+        out = filter_scrape_urls(urls, max_days=7, geo="RU")
         self.assertEqual(len(out), 1)
         self.assertIn(today_slug, out[0])
 
