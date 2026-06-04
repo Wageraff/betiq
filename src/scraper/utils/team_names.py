@@ -1,10 +1,17 @@
-"""Нормализация названий команд (без зависимости от БД)."""
+"""Нормализация названий команд → канонический EN-ключ (хук canonical_team_key)."""
 from __future__ import annotations
 
 import re
 import unicodedata
 
+from src.scraper.utils.team_aliases import TEAM_ALIASES
+
 CLUB_PREFIXES = re.compile(r"\b(fc|fk|sc|ac|sk|bk|if|afc|cf|rc)\b", re.I)
+
+_WOMEN_MARKER = re.compile(
+    r"\(f\)|\(w\)|\(жен\.?\)|\(female\)|\(femei\)|\bwomen\b|\(f\.\)",
+    re.I,
+)
 
 _CYRILLIC_MAP = {
     "а": "a",
@@ -42,34 +49,6 @@ _CYRILLIC_MAP = {
     "я": "ya",
 }
 
-# RO/RU/варианты без диакритики → канонический ключ (англ.)
-_TEAM_ALIASES: dict[str, str] = {
-    "frana": "france",
-    "franta": "france",
-    "frantsiya": "france",
-    "franciya": "france",
-    "coastadefildes": "ivorycoast",
-    "coastadefilde": "ivorycoast",
-    "coastadefildei": "ivorycoast",
-    "kotdivuar": "ivorycoast",
-    "kotdivoire": "ivorycoast",
-    "cotedivoire": "ivorycoast",
-    "anglia": "england",
-    "olanda": "netherlands",
-    "danemarca": "denmark",
-    "nouazeelanda": "newzealand",
-    "alger": "algeria",
-    "belgia": "belgium",
-    "polonia": "poland",
-    "luxemburg": "luxembourg",
-    "italia": "italy",
-    "tunisia": "tunisia",
-    "honduras": "honduras",
-    "argentina": "argentina",
-    "nigeria": "nigeria",
-}
-
-# Диакритика, которая не всегда в категории Mn (ș, ț и т.д.)
 _LATIN_FOLD = str.maketrans(
     {
         "ș": "s",
@@ -91,7 +70,6 @@ _LATIN_FOLD = str.maketrans(
     }
 )
 
-# Канонические английские названия для справочника (ключ = normalized_key).
 _CANONICAL_DISPLAY: dict[str, str] = {
     "france": "France",
     "ivorycoast": "Ivory Coast",
@@ -117,6 +95,52 @@ _CANONICAL_DISPLAY: dict[str, str] = {
     "luxembourg": "Luxembourg",
     "tunisia": "Tunisia",
     "nigeria": "Nigeria",
+    "mexico": "Mexico",
+    "colombia": "Colombia",
+    "serbia": "Serbia",
+    "syria": "Syria",
+    "greece": "Greece",
+    "sweden": "Sweden",
+    "belarus": "Belarus",
+    "tajikistan": "Tajikistan",
+    "india": "India",
+    "iraq": "Iraq",
+    "czechia": "Czechia",
+    "guatemala": "Guatemala",
+    "cyprus": "Cyprus",
+    "guinea": "Guinea",
+    "northernireland": "Northern Ireland",
+    "andorra": "Andorra",
+    "liechtenstein": "Liechtenstein",
+    "slovakia": "Slovakia",
+    "slovenia": "Slovenia",
+    "montenegro": "Montenegro",
+    "hungary": "Hungary",
+    "finland": "Finland",
+    "norway": "Norway",
+    "morocco": "Morocco",
+    "egypt": "Egypt",
+    "switzerland": "Switzerland",
+    "turkey": "Turkey",
+    "usa": "USA",
+    "jordan": "Jordan",
+    "chile": "Chile",
+    "canada": "Canada",
+    "venezuela": "Venezuela",
+    "australia": "Australia",
+    "ireland": "Ireland",
+    "uzbekistan": "Uzbekistan",
+    "wales": "Wales",
+    "moldova": "Moldova",
+    "bulgaria": "Bulgaria",
+    "brazilwomen": "Brazil (W)",
+    "dominicanwomen": "Dominican Republic (W)",
+    "turkeywomen": "Turkey (W)",
+    "netherlandswomen": "Netherlands (W)",
+    "cska": "CSKA",
+    "unics": "UNICS",
+    "indianafever": "Indiana Fever",
+    "atlantadream": "Atlanta Dream",
 }
 
 
@@ -125,10 +149,10 @@ def resolve_team_key(key: str) -> str:
     k = (key or "").strip().lower()
     if not k:
         return ""
-    return _TEAM_ALIASES.get(k, k)
+    return TEAM_ALIASES.get(k, k)
 
 
-_COUNTRY_KEYS: set[str] = set(_CANONICAL_DISPLAY) | set(_TEAM_ALIASES.values())
+_COUNTRY_KEYS: set[str] = set(_CANONICAL_DISPLAY) | set(TEAM_ALIASES.values())
 
 
 def is_likely_person_key(key: str) -> bool:
@@ -153,7 +177,7 @@ def pick_best_display_raw(candidates: list[str], normalized_key: str) -> str:
     valid: list[str] = []
     for name in candidates:
         n = (name or "").strip()
-        if n and resolve_team_key(normalize_team_name(n)) == key:
+        if n and canonical_team_key(n) == key:
             valid.append(n)
     if not valid:
         return ""
@@ -171,7 +195,7 @@ def pick_best_display_raw(candidates: list[str], normalized_key: str) -> str:
 def legacy_keys_for(canonical_key: str) -> list[str]:
     """Все ключи в БД, которые относятся к одной команде."""
     keys = {canonical_key}
-    for old, new in _TEAM_ALIASES.items():
+    for old, new in TEAM_ALIASES.items():
         if new == canonical_key:
             keys.add(old)
     return sorted(keys)
@@ -188,6 +212,78 @@ def _transliterate_cyrillic(text: str) -> str:
     return "".join(out)
 
 
+def _mechanical_key(name: str) -> str:
+    """Транслит + снятие диакритики, без алиасов."""
+    name = unicodedata.normalize("NFD", name)
+    name = "".join(c for c in name if unicodedata.category(c) != "Mn")
+    name = name.translate(_LATIN_FOLD)
+    name = _transliterate_cyrillic(name)
+    name = name.lower()
+    name = CLUB_PREFIXES.sub("", name)
+    name = re.sub(r"[^a-z0-9]", "", name)
+    return name.strip()
+
+
+def _person_canonical(mechanical: str, raw: str) -> str:
+    """
+    Теннисисты: «Matteo Arnaldi» и «Арнальди М.» → один ключ (sorted tokens / alias).
+    """
+    if mechanical in _COUNTRY_KEYS or len(mechanical) < 8:
+        return mechanical
+    if mechanical in TEAM_ALIASES:
+        return resolve_team_key(mechanical)
+
+    tokens = re.findall(r"[a-z]{2,}", raw.lower().replace("—", " "))
+    tokens = [_transliterate_cyrillic(t) for t in tokens]
+    tokens = [re.sub(r"[^a-z]", "", t) for t in tokens if t]
+    tokens = [t for t in tokens if len(t) > 1]
+
+    if len(tokens) >= 2:
+        return "".join(sorted(tokens))
+
+    if len(tokens) == 1 and len(mechanical) > len(tokens[0]):
+        suffix = mechanical[len(tokens[0]) :]
+        if len(suffix) == 1:
+            return mechanical
+
+    return mechanical
+
+
+def canonical_team_key(name: str) -> str:
+    """
+    Хук: любое написание с сайта → один канонический ключ (англ./латиница).
+
+    Используется для match_key, справочника teams и слияния дубликатов.
+    """
+    raw = (name or "").strip()
+    if not raw:
+        return ""
+
+    women = bool(_WOMEN_MARKER.search(raw))
+    cleaned = _WOMEN_MARKER.sub("", raw)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    mechanical = _mechanical_key(cleaned)
+    if not mechanical:
+        return ""
+
+    key = resolve_team_key(mechanical)
+    if key not in _COUNTRY_KEYS:
+        key = resolve_team_key(_person_canonical(mechanical, cleaned))
+
+    if women and not key.endswith("women"):
+        base = key[: -5] if key.endswith("women") else key
+        if base in _COUNTRY_KEYS or len(base) >= 4:
+            key = f"{base}women"
+
+    return key
+
+
+def normalize_team_name(name: str) -> str:
+    """Алиас для match_key / dedupe — всегда канонический ключ."""
+    return canonical_team_key(name)
+
+
 def canonical_team_display(
     normalized_key: str,
     *,
@@ -199,7 +295,7 @@ def canonical_team_display(
     if not key:
         return ""
     raw = (raw_name or "").strip()
-    if raw and normalize_team_name(raw) == key:
+    if raw and canonical_team_key(raw) == key:
         if sport == "tennis" or is_likely_person_key(key) or " " in raw or "-" in raw:
             return format_person_display(raw)
         return raw
@@ -246,16 +342,4 @@ def is_catalog_display_name(
     target = canonical_team_display(key, raw_name=display, sport=sport)
     if display == target:
         return False
-    return resolve_team_key(normalize_team_name(display)) == key
-
-
-def normalize_team_name(name: str) -> str:
-    name = unicodedata.normalize("NFD", name)
-    name = "".join(c for c in name if unicodedata.category(c) != "Mn")
-    name = name.translate(_LATIN_FOLD)
-    name = _transliterate_cyrillic(name)
-    name = name.lower()
-    name = CLUB_PREFIXES.sub("", name)
-    name = re.sub(r"[^a-z0-9]", "", name)
-    name = name.strip()
-    return _TEAM_ALIASES.get(name, name)
+    return canonical_team_key(display) == key

@@ -13,8 +13,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from src.scraper.utils.match_key import build_match_key
-from src.scraper.utils.team_names import normalize_team_name
+from src.scraper.utils.match_key_build import build_match_key
+from src.scraper.utils.team_names import canonical_team_key
 
 # Имена команд, как их отдают сайты (curl / парсеры)
 CASES = [
@@ -34,7 +34,7 @@ def main() -> None:
         key = build_match_key(home, away, MATCH_DAY)
         keys.add(key)
         print(f"{source:20} {home!r:22} vs {away!r:22}")
-        print(f"  norm: {normalize_team_name(home):12} : {normalize_team_name(away)}")
+        print(f"  norm: {canonical_team_key(home):12} : {canonical_team_key(away)}")
         print(f"  key:  {key}\n")
 
     if len(keys) == 1:

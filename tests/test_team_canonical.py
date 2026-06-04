@@ -1,0 +1,58 @@
+"""Канонические ключи команд (хук canonical_team_key)."""
+from __future__ import annotations
+
+import sys
+import unittest
+from datetime import date
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from src.scraper.utils.match_key_build import build_match_key
+from src.scraper.utils.team_names import canonical_team_key
+
+
+class TeamCanonicalTests(unittest.TestCase):
+    def test_russia_variants(self) -> None:
+        for name in ("Rusia", "Rossiya", "Россия", "Russia"):
+            self.assertEqual(canonical_team_key(name), "russia")
+
+    def test_mexico_variants(self) -> None:
+        for name in ("Mexic", "Meksika", "Мексика", "Mexico"):
+            self.assertEqual(canonical_team_key(name), "mexico")
+
+    def test_spain_iraq_syria(self) -> None:
+        self.assertEqual(canonical_team_key("Spania"), "spain")
+        self.assertEqual(canonical_team_key("Испания"), "spain")
+        self.assertEqual(canonical_team_key("Irak"), "iraq")
+        self.assertEqual(canonical_team_key("Siriya"), "syria")
+
+    def test_same_match_key_russia_burkina(self) -> None:
+        day = date(2026, 6, 5)
+        k1 = build_match_key("Rusia", "Burkina Faso", day)
+        k2 = build_match_key("Rossiya", "Burkina Faso", day)
+        self.assertEqual(k1, k2)
+
+    def test_france_ivory(self) -> None:
+        day = date(2026, 6, 4)
+        keys = {
+            build_match_key(h, a, day)
+            for h, a in (
+                ("Franta", "Coasta de Fildes"),
+                ("Франция", "Кот-д'Ивуар"),
+                ("France", "Ivory Coast"),
+            )
+        }
+        self.assertEqual(len(keys), 1)
+
+    def test_tennis_arnaldi(self) -> None:
+        self.assertEqual(
+            canonical_team_key("Matteo Arnaldi"),
+            canonical_team_key("Арнальди М."),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

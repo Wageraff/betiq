@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models import Match, Team
 from src.scraper.utils.team_names import (
     canonical_team_display,
+    canonical_team_key,
     is_catalog_display_name,
     legacy_keys_for,
     merge_alias_text,
@@ -58,12 +59,12 @@ async def get_or_create_team(
 ) -> Team:
     """Найти или создать запись в справочнике по нормализованному ключу (EN)."""
     raw = (name or "").strip()
-    key = normalize_team_name(raw)
+    key = canonical_team_key(raw)
     if not key:
         raise ValueError(f"Cannot normalize team name: {name!r}")
 
     canonical = canonical_team_display(key, raw_name=raw, sport=sport)
-    lookup_keys = legacy_keys_for(key)
+    lookup_keys = legacy_keys_for(resolve_team_key(key))
 
     candidates = (
         await session.scalars(select(Team).where(Team.normalized_key.in_(lookup_keys)))

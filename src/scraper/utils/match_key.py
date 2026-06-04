@@ -8,27 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Match
 from src.db.teams import get_or_create_team
-from src.scraper.utils.team_names import normalize_team_name
+from src.scraper.utils.match_key_build import build_match_key, build_slug
+from src.scraper.utils.team_names import canonical_team_key, normalize_team_name
 
 # Re-export for existing imports
 __all__ = [
     "normalize_team_name",
+    "canonical_team_key",
     "build_match_key",
     "build_slug",
     "find_or_create_match",
 ]
-
-
-def build_match_key(team_home: str, team_away: str, match_date: date) -> str:
-    home = normalize_team_name(team_home)
-    away = normalize_team_name(team_away)
-    return f"{home}:{away}:{match_date.isoformat()}"
-
-
-def build_slug(team_home: str, team_away: str, match_date: date) -> str:
-    home = normalize_team_name(team_home)
-    away = normalize_team_name(team_away)
-    return f"{home}-vs-{away}-{match_date.strftime('%d-%m-%Y')}"
 
 
 def _refresh_match_fields(match: Match, data: dict) -> None:
@@ -79,8 +69,8 @@ async def _find_by_normalized_teams(
     )
     for match in candidates:
         if (
-            normalize_team_name(match.team_home) == home_norm
-            and normalize_team_name(match.team_away) == away_norm
+            canonical_team_key(match.team_home) == home_norm
+            and canonical_team_key(match.team_away) == away_norm
         ):
             return match
     return None
@@ -91,8 +81,8 @@ async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
     match_dt: datetime = data["match_date"]
     day = _as_date(match_dt)
     key = build_match_key(data["team_home"], data["team_away"], day)
-    home_norm = normalize_team_name(data["team_home"])
-    away_norm = normalize_team_name(data["team_away"])
+    home_norm = canonical_team_key(data["team_home"])
+    away_norm = canonical_team_key(data["team_away"])
 
     match = await session.scalar(select(Match).where(Match.match_key == key))
     if match:
