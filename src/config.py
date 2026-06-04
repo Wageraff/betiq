@@ -24,6 +24,7 @@ _cfg = _read_config()
 _scraper = _cfg["scraper"] if _cfg.has_section("scraper") else {}
 _datetime = _cfg["datetime"] if _cfg.has_section("datetime") else {}
 _logging = _cfg["logging"] if _cfg.has_section("logging") else {}
+_ai = _cfg["ai"] if _cfg.has_section("ai") else {}
 
 
 class Settings(BaseSettings):
@@ -41,6 +42,8 @@ class Settings(BaseSettings):
     )
 
     anthropic_api_key: str = ""
+    # Claude API model ID (см. https://docs.anthropic.com — claude-sonnet-4-6)
+    anthropic_model: str = _ai.get("model", fallback="claude-sonnet-4-6")
     telegram_bot_token: str = ""
     telegram_admin_chat_id: str = ""
     admin_api_key: str = ""

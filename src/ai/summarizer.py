@@ -24,8 +24,6 @@ from src.db.session import async_session_factory
 
 log = logging.getLogger("summarizer")
 
-AI_MODEL = "claude-sonnet-4-20250514"
-
 
 def needs_ai(match: Match) -> bool:
     if (match.predictions_count or 0) < 2:
@@ -101,9 +99,10 @@ async def _call_claude(prompt: str) -> dict[str, Any]:
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
 
+    model = settings.anthropic_model
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
-        model=AI_MODEL,
+        model=model,
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -154,7 +153,7 @@ async def generate_for_match(
     match.ai_top_pick = result["top_pick"]
     match.ai_confidence = result["confidence"]
     match.ai_generated_at = datetime.utcnow()
-    match.ai_model = AI_MODEL
+    match.ai_model = settings.anthropic_model
     await session.commit()
     log.info("AI summary generated for match %s (%s)", match_id, match.slug)
     return True

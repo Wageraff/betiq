@@ -5,7 +5,7 @@
   sudo systemctl stop betiq-scheduler
   cd /opt/betiq && export PYTHONPATH=/opt/betiq
   ./venv/bin/python3.11 scripts/ingest_urls.py --force URL1 URL2 ...
-  ./venv/bin/python3.11 -m src.ai.summarizer --match-id ID --force
+  ./venv/bin/python3.11 -m src.ai.summarizer --match-id 49 --force
 """
 from __future__ import annotations
 
