@@ -67,13 +67,17 @@ async def merge_match_into(
         keeper.ai_generated_at = dup.ai_generated_at
         keeper.ai_model = dup.ai_model
 
+    await session.delete(dup)
+    await session.flush()
+
     keeper.predictions_count = await _recount(session, keeper.id)
     day = _day_bucket(keeper.match_date)
     if day:
-        keeper.match_key = build_match_key(keeper.team_home, keeper.team_away, day)
-        keeper.slug = build_slug(keeper.team_home, keeper.team_away, day)
+        new_key = build_match_key(keeper.team_home, keeper.team_away, day)
+        if keeper.match_key != new_key:
+            keeper.match_key = new_key
+            keeper.slug = build_slug(keeper.team_home, keeper.team_away, day)
 
-    await session.delete(dup)
     await session.flush()
 
 

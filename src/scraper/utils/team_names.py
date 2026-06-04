@@ -44,6 +44,7 @@ _CYRILLIC_MAP = {
 
 # RO/RU/варианты без диакритики → канонический ключ (англ.)
 _TEAM_ALIASES: dict[str, str] = {
+    "frana": "france",
     "franta": "france",
     "frantsiya": "france",
     "franciya": "france",

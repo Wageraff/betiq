@@ -18,13 +18,11 @@ from src.scraper.utils.team_names import (
 
 
 async def _fix_team_displays(session: AsyncSession) -> int:
+    """Только display_name/aliases — normalized_key задаёт dedupe_teams."""
     n = 0
     for t in await session.scalars(select(Team)):
         canon_key = resolve_team_key(t.normalized_key)
         canonical = canonical_team_display(canon_key)
-        if t.normalized_key != canon_key:
-            t.normalized_key = canon_key
-            n += 1
         if is_catalog_display_name(t.display_name, canon_key) and t.display_name != canonical:
             t.aliases = merge_alias_text(t.aliases, t.display_name)
             t.display_name = canonical
@@ -35,6 +33,16 @@ async def _fix_team_displays(session: AsyncSession) -> int:
 async def run_repair_catalog(*, dry_run: bool = False) -> dict[str, int]:
     async with async_session_factory() as session:
         teams_removed = await dedupe_teams(session, dry_run=dry_run)
+        if dry_run:
+            matches_merged = await dedupe_matches(session, dry_run=True)
+            await session.rollback()
+            return {
+                "teams_removed": teams_removed,
+                "display_fixes": 0,
+                "matches_merged": matches_merged,
+            }
+
+        await session.flush()
 
         matches = list(await session.scalars(select(Match)))
         for m in matches:
@@ -48,10 +56,8 @@ async def run_repair_catalog(*, dry_run: bool = False) -> dict[str, int]:
                 ).id
 
         fixed = await _fix_team_displays(session)
-        matches_merged = await dedupe_matches(session, dry_run=dry_run)
-
-        if not dry_run:
-            await session.commit()
+        matches_merged = await dedupe_matches(session, dry_run=False)
+        await session.commit()
 
         return {
             "teams_removed": teams_removed,

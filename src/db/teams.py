@@ -37,9 +37,13 @@ async def get_or_create_team(
     team = next((t for t in candidates if t.normalized_key == key), None)
     if not team and candidates:
         team = min(candidates, key=lambda t: t.id)
+    if team and team.normalized_key != key:
+        canonical_row = await session.scalar(
+            select(Team).where(Team.normalized_key == key)
+        )
+        if canonical_row:
+            team = canonical_row
     if team:
-        if team.normalized_key != key:
-            team.normalized_key = key
         if sport and not team.sport:
             team.sport = sport
         if raw and raw != canonical:
