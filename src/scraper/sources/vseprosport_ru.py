@@ -236,10 +236,17 @@ _PARSE_JS = """
   }
 
   const isNoisePick = (pick) => {
-    if (!pick || pick.length > 120) return true;
+    if (!pick || pick.length > 120 || pick.length < 5) return true;
     if (/прогноз\\s+и\\s+ставки|^прогноз$/i.test(pick)) return true;
     if (/^анализ\\s+команд/i.test(pick)) return true;
+    if (/мячей\\s+за$/i.test(pick)) return true;
+    if (/^\\d+\\s+мячей/i.test(pick)) return true;
     return false;
+  };
+
+  const cleanOdds = (raw) => {
+    const m = (raw || '').match(/(\\d{1,2}[.,]\\d{2})/);
+    return m ? m[1] : '';
   };
 
   const collectBets = (root) => {
@@ -247,8 +254,8 @@ _PARSE_JS = """
     if (!root) return out;
     const seen = new Set();
     root.querySelectorAll('.coef-tip').forEach((coefEl) => {
-      const odds = (coefEl.textContent || '').trim();
-      if (!odds || !/[\\d]/.test(odds)) return;
+      const odds = cleanOdds(coefEl.textContent || '');
+      if (!odds) return;
       let pick = '';
       const row = coefEl.closest(
         '.expert-tip, .d-flex, .row, [class*="forecast"], [class*="tip"]'
@@ -268,6 +275,7 @@ _PARSE_JS = """
           prev = prev.previousElementSibling;
         }
       }
+      pick = pick.replace(/^[Пп]рогноз(?=[А-ЯЁ])/u, '').trim();
       pick = pick.replace(/^прогноз\\s*/i, '').trim();
       if (isNoisePick(pick)) return;
       const key = pick + '|' + odds;
@@ -344,6 +352,11 @@ _BET_PICK_NOISE = re.compile(
     r"^прогноз\s+и\s+ставки\s*|^прогноз\s*|анализ\s+команд",
     re.I,
 )
+_TEXT_BET = re.compile(
+    r"(тотал\s+(?:больше|меньше)\s*[\d.,]+(?:\s*(?:голов|мячей|очков))?|"
+    r"победа\s+[«\"]?[^«\"\n@]{3,70}[»\"]?)\s+за\s+(\d{1,2}[.,]\d{2})",
+    re.I,
+)
 
 _SLUG_SPORT_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"nhl|hokkej|hockey", re.I), "hockey"),
@@ -403,18 +416,32 @@ def _sport_from_slug(url: str) -> str:
 
 
 def _sport_from_competition(comp: str) -> str:
+    """Короткая строка турнира из category-head (без полного текста статьи)."""
     c = (comp or "").lower()
-    if re.search(r"нхл|\bnhl\b|хоккей|khl", c):
+    if re.search(r"нхл|\bnhl\b|хоккей|khl|плей-офф", c):
         return "hockey"
-    if re.search(r"атп|\bwta\b|простеев|rolan|теннис|tennis", c):
+    if re.search(r"простеев|rolan|\bатп\b|\bwta\b|теннис", c):
         return "tennis"
-    if re.search(r"баскет|втб|\bnba\b", c):
+    if re.search(r"баскет|\bвтб\b|\bnba\b", c):
         return "basketball"
     if re.search(r"волейбол|volleyball", c):
         return "volleyball"
     if re.search(r"гандбол|handball", c):
         return "handball"
-    if re.search(r"товарищ|футбол|чемпионат|football|liga|лига", c):
+    if re.search(r"товарищ|футбол|football", c):
+        return "football"
+    return ""
+
+
+def _sport_from_body(text: str) -> str:
+    c = (text or "").lower()
+    if re.search(r"теннисист|теннис\b|atp|wta", c):
+        return "tennis"
+    if re.search(r"\bнхл\b|хоккеист|хоккей|«канадиенс|nhl", c):
+        return "hockey"
+    if re.search(r"баскетбол|nba|единая лига", c):
+        return "basketball"
+    if re.search(r"товарищеск", c):
         return "football"
     return ""
 
@@ -475,6 +502,46 @@ def _build_match_date(raw: dict, url: str) -> Optional[datetime]:
     return default_kickoff_storage(d, geo=geo) if d else None
 
 
+def _clean_bet_pick(pick: str) -> str:
+    pick = (pick or "").strip()
+    pick = _BET_PICK_NOISE.sub("", pick)
+    pick = re.sub(r"^[Пп]рогноз(?=[А-ЯЁA-Z])", "", pick)
+    pick = re.sub(r"^прогноз\s*", "", pick, flags=re.I)
+    pick = re.sub(r"\s+", " ", pick).strip(" ,-«»\"'")
+    if re.search(r"мячей\s+за$|^\d+\s+мячей", pick, re.I):
+        return ""
+    if len(pick) < 5 or re.search(r"^прогноз\b", pick, re.I):
+        return ""
+    return pick
+
+
+def _bets_from_full_text(full_text: str) -> list[tuple[str, str]]:
+    if not full_text:
+        return []
+    found: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for m in _TEXT_BET.finditer(full_text):
+        pick = _clean_bet_pick(m.group(1))
+        if not pick:
+            continue
+        key = (pick, m.group(2))
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append((pick, m.group(2)))
+    if not found:
+        m = re.search(
+            r"(тотал\s+больше\s+[\d.,]+\s*(?:голов|мячей)?)\s+за\s+(\d{1,2}[.,]\d{2})",
+            full_text,
+            re.I,
+        )
+        if m:
+            pick = _clean_bet_pick(m.group(1))
+            if pick:
+                found.append((pick, m.group(2)))
+    return found
+
+
 def _parse_bets(
     bets_dom: list[dict],
     bet_lines: list[str],
@@ -484,12 +551,9 @@ def _parse_bets(
     seen: set[tuple[str, str]] = set()
 
     def add(pick: str, odds_raw: str) -> None:
-        pick = _BET_PICK_NOISE.sub("", pick)
-        pick = re.sub(r"\s+", " ", pick).strip(" ,-«»\"'")
-        if not pick or re.search(r"^прогноз\b", pick, re.I):
-            return
+        pick = _clean_bet_pick(pick)
         odds = parse_odds(odds_raw)
-        if odds is None:
+        if not pick or odds is None:
             return
         key = (pick, str(odds))
         if key in seen:
@@ -504,29 +568,26 @@ def _parse_bets(
             }
         )
 
+    text_pairs = _bets_from_full_text(full_text)
+    dom_pairs: list[tuple[str, str]] = []
     for item in bets_dom or []:
-        add((item.get("pick") or "").strip(), (item.get("odds") or "").strip())
+        pick = _clean_bet_pick((item.get("pick") or "").strip())
+        if pick:
+            dom_pairs.append((pick, (item.get("odds") or "").strip()))
 
-    lines = list(bet_lines or [])
-    if not lines and full_text:
-        for line in full_text.splitlines():
-            line = line.strip()
-            if _BET_LINE.match(line):
-                lines.append(line)
+    use_text_first = bool(text_pairs) and (
+        not dom_pairs or max(len(p) for p, _ in dom_pairs) < 12
+    )
+    for pick, odds_raw in text_pairs if use_text_first else dom_pairs:
+        add(pick, odds_raw)
+    if not out:
+        for pick, odds_raw in text_pairs:
+            add(pick, odds_raw)
+        for pick, odds_raw in dom_pairs:
+            add(pick, odds_raw)
 
-    for line in lines:
+    for line in bet_lines or []:
         m = _BET_LINE.match(line.strip())
-        if m:
-            add(m.group(1).strip(), m.group(2))
-
-    if not out and full_text:
-        m = re.search(
-            r"(тотал\s+[^.\\n]{3,80}|победа\s+[^.\\n]{3,60}|"
-            r"фора\s*\([^)]+\)[^.\\n]{0,40}|[^.\\n]{5,80})\s+"
-            r"(?:за\s+)?(\d{1,2}[.,]\d{2})",
-            full_text,
-            re.I,
-        )
         if m:
             add(m.group(1).strip(), m.group(2))
 
@@ -534,21 +595,22 @@ def _parse_bets(
 
 
 def _resolve_sport(raw: dict, url: str) -> str:
-    text_sample = " ".join(
+    competition = (raw.get("competition") or "").strip()
+    body_text = " ".join(
         [
-            raw.get("competition") or "",
             raw.get("h1") or "",
-            (raw.get("domText") or "")[:2000],
-            (raw.get("articleBody") or "")[:2000],
+            (raw.get("domText") or "")[:4000],
+            (raw.get("articleBody") or "")[:4000],
         ]
     )
     for candidate in (
-        normalize_sport(raw.get("sport") or ""),
-        normalize_sport(raw.get("pageSport") or ""),
+        _sport_from_slug(url),
+        _sport_from_competition(competition),
+        _sport_from_body(body_text),
         _URL_SPORT_HINT.get(url.rstrip("/")),
         _sport_from_url(url),
-        _sport_from_slug(url),
-        _sport_from_competition(text_sample),
+        normalize_sport(raw.get("sport") or ""),
+        normalize_sport(raw.get("pageSport") or ""),
     ):
         if candidate:
             return candidate
