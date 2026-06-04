@@ -47,7 +47,7 @@ PYTHONPATH=. python -m src.bot.telegram
 
 ## Configuration
 
-- `config.ini` — scraper delays, timeouts, logging
+- `config.ini` — scraper delays, timeouts, logging, `url_list_cache_ttl_minutes`, `block_heavy_resources`
 - `.env` — `DATABASE_URL`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_CHAT_ID`
 - `proxies.txt` — one proxy per line (`http://user:pass@host:port`)
 

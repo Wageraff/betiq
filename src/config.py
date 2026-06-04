@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     scrape_delay_max: float = float(_scraper.get("max_delay", fallback=5.0))
     scrape_max_retries: int = int(_scraper.get("max_retries", fallback=3))
     scrape_articles_max_age_days: int = int(_scraper.get("articles_max_age_days", fallback=7))
+    # Кэш URL с листингов (мин); 25 ≈ между quick scrape 30m. 0 = выкл.
+    scrape_url_list_cache_ttl_minutes: int = int(
+        _scraper.get("url_list_cache_ttl_minutes", fallback=25)
+    )
+    # Блокировка image/font/media/stylesheet и типичной рекламы в Playwright
+    scrape_block_heavy_resources: bool = _scraper.getboolean(
+        "block_heavy_resources", fallback=True
+    )
     # Если area-{geo} источника недоступен — проверяем прокси с этим geo (обычно RO)
     proxy_fallback_geo: str = _scraper.get("proxy_fallback_geo", fallback="GB")
 

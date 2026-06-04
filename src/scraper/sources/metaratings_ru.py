@@ -161,11 +161,30 @@ _PARSE_JS = """
   };
 
   let author = '';
-  const authorEl = document.querySelector('.PostAuthor, [class*="PostAuthor"]');
-  if (authorEl) {
-    const link = authorEl.querySelector('a');
-    author = (link ? link.textContent : authorEl.textContent || '').trim();
-    author = author.replace(/^Эксперт:?\\s*/i, '').trim();
+  const authorSelectors = [
+    '.PostAuthor a',
+    '.PostAuthor',
+    '[class*="PostAuthor"] a',
+    '[class*="PostAuthor"]',
+    '[class*="post-author"] a',
+    '[class*="post-author"]',
+    'a[href*="/prognozisty/"]',
+    'a[href*="/author/"]',
+  ];
+  for (const sel of authorSelectors) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const t = (el.textContent || '').trim();
+    if (t && t.length < 80) {
+      author = t;
+      break;
+    }
+  }
+  author = author.replace(/^Эксперт:?\\s*/i, '').trim();
+  if (!author && event) {
+    const a = event.author;
+    if (a && typeof a === 'object' && a.name) author = String(a.name).trim();
+    else if (typeof a === 'string') author = a.trim();
   }
 
   const versusEl = document.querySelector('.versus-info.workarea-text, .versus-info');
@@ -253,15 +272,69 @@ def _is_valid_teams(team_home: str, team_away: str) -> bool:
     return not bad.search(team_home) and not bad.search(team_away)
 
 
-def _competition_from_versus(text: str) -> tuple[str, str]:
+_VERSUS_DATE_TAIL = re.compile(
+    r"\s+\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{4}.*$|,\s*\d{1,2}:\d{2}\s*\([^)]+\)\s*$",
+    re.I,
+)
+_VERSUS_MATCHUP_TAIL = re.compile(
+    r"\s+[А-ЯЁA-Z][а-яёa-z]+(?:\s+[А-ЯЁA-Z][а-яёa-z]+)?\s+[—–-]\s+.+$",
+)
+
+
+def _trim_competition_stage(stage: str, team_home: str, team_away: str) -> str:
+    stage = _VERSUS_DATE_TAIL.sub("", stage).strip()
+    stage = re.sub(r"\s*,\s*\d+-й\s+матч\s*$", "", stage, flags=re.I)
+    if team_home and team_away:
+        m = re.search(
+            rf"\s+{re.escape(team_home)}\s*[—–-]\s*{re.escape(team_away)}",
+            stage,
+            re.I,
+        )
+        if m:
+            stage = stage[: m.start()].strip().rstrip(",")
+    stage = _VERSUS_MATCHUP_TAIL.sub("", stage).strip()
+    for name in sorted((team_home, team_away), key=len, reverse=True):
+        if not name:
+            continue
+        idx = stage.lower().find(name.lower())
+        if idx > 0:
+            stage = stage[:idx].strip().rstrip(",")
+    return re.sub(r"\s+", " ", stage).strip()
+
+
+def _competition_from_versus(
+    text: str, *, team_home: str = "", team_away: str = ""
+) -> tuple[str, str]:
     if not text:
         return "", ""
-    parts = [p.strip() for p in re.split(r"\s*\.\s*", text) if p.strip()]
-    if len(parts) >= 2:
-        sport = normalize_sport(parts[0]) or ""
-        comp = ". ".join(parts[1:])
-        return sport, comp
-    return "", text.strip()
+    text = re.sub(r"\s+", " ", text.strip())
+    text = _VERSUS_DATE_TAIL.sub("", text)
+
+    parts = [p.strip() for p in text.split(". ") if p.strip()]
+    if not parts:
+        return "", ""
+
+    sport = normalize_sport(parts[0]) or ""
+    if len(parts) == 1:
+        return sport, parts[0]
+
+    tournament = parts[1]
+    stage = _trim_competition_stage(". ".join(parts[2:]), team_home, team_away) if len(parts) > 2 else ""
+    comp = f"{tournament}. {stage}".strip(" .") if stage else tournament
+    return sport, comp
+
+
+def _competition_from_slug(url: str) -> str:
+    slug = urlparse(url).path.rstrip("/").split("/")[-1].lower()
+    if "tovarisheskii" in slug:
+        return "Товарищеский матч"
+    if "chempionat-mira" in slug:
+        return "Чемпионат мира"
+    if "chempionat-evropy" in slug:
+        return "Чемпионат Европы"
+    if "kubok" in slug:
+        return "Кубок"
+    return ""
 
 
 def _teams_from_slug(url: str) -> tuple[str, str]:
@@ -419,9 +492,15 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         log.warning("Skip %s: could not resolve sport", url)
         return None
 
-    _, competition = _competition_from_versus(raw.get("versusText") or "")
+    _, competition = _competition_from_versus(
+        raw.get("versusText") or "",
+        team_home=team_home,
+        team_away=team_away,
+    )
     if not competition:
         competition = (raw.get("competition") or "").strip()
+    if not competition:
+        competition = _competition_from_slug(url)
 
     bets = _parse_bets(raw.get("betLines") or [], full_text)
     if not bets:

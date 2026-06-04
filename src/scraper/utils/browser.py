@@ -7,7 +7,14 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import AsyncIterator, Optional, Tuple
 
-from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    Playwright,
+    Route,
+    async_playwright,
+)
 
 from src.config import USER_AGENTS, settings
 
@@ -30,6 +37,37 @@ _browser: Optional[Browser] = None
 _proxy_pool = ProxyPool()
 
 _geo_ctx: ContextVar[Optional[str]] = ContextVar("scraper_proxy_geo", default=None)
+
+_BLOCKED_RESOURCE_TYPES = frozenset({"image", "font", "media", "stylesheet"})
+
+_AD_URL_MARKERS = (
+    "doubleclick.net",
+    "googlesyndication.com",
+    "google-analytics.com",
+    "googletagmanager.com",
+    "googleadservices.com",
+    "facebook.net/tr",
+    "adservice.google",
+    "/ads/",
+    "/ad/",
+    "banner",
+    "taboola.com",
+    "outbrain.com",
+    "criteo.com",
+    "hotjar.com",
+    "clarity.ms",
+    "mc.yandex",
+    "an.yandex.ru",
+    "metrika.yandex",
+    "adfox.ru",
+    "begun.ru",
+    "mail.ru/ads",
+    "adsystem",
+    "adriver.ru",
+    "relap.io",
+    "smi2.ru",
+    "mediametrics",
+)
 
 GEO_LOCALE: dict[str, str] = {
     "RO": "ro-RO",
@@ -129,6 +167,30 @@ async def _page_title_safe(page: Page, *, attempts: int = 6, delay_ms: int = 150
     return ""
 
 
+def _should_block_request(url: str, resource_type: str) -> bool:
+    if not settings.scrape_block_heavy_resources:
+        return False
+    if resource_type in _BLOCKED_RESOURCE_TYPES:
+        return True
+    lower = url.lower()
+    return any(marker in lower for marker in _AD_URL_MARKERS)
+
+
+async def _on_route_block_heavy(route: Route) -> None:
+    req = route.request
+    if _should_block_request(req.url, req.resource_type):
+        await route.abort()
+    else:
+        await route.continue_()
+
+
+async def attach_resource_blocking(context: BrowserContext) -> None:
+    """Блокирует картинки, шрифты, CSS, медиа и типичную рекламу."""
+    if not settings.scrape_block_heavy_resources:
+        return
+    await context.route("**/*", _on_route_block_heavy)
+
+
 async def wait_cloudflare(page: Page, base_ms: int = 3000) -> None:
     title = await _page_title_safe(page)
     lower = title.lower()
@@ -204,6 +266,7 @@ async def new_context(geo: Optional[str] = None) -> Tuple[BrowserContext, Option
         ctx_kw["proxy"] = pw_proxy
 
     context = await browser.new_context(**ctx_kw)
+    await attach_resource_blocking(context)
     return context, proxy
 
 

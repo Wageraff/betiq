@@ -15,6 +15,9 @@ logs/
 .env
 proxies.txt
 
+# Scraper URL list cache (per source_id JSON)
+data/scrape_url_cache/
+
 # Local DB artifacts (if any)
 data/*.db
 data/*.db-journal

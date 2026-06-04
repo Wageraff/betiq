@@ -36,6 +36,7 @@ from src.scraper.utils.alerter import (
 from src.scraper.utils.match_key import find_or_create_match
 from src.scraper.utils.match_datetime import to_storage_datetime
 from src.scraper.utils.normalizer import is_upcoming_match, parse_date_from_url
+from src.scraper.utils import url_list_cache
 
 log = logging.getLogger("engine")
 
@@ -138,35 +139,84 @@ async def scrape_source(
     try:
         async with scrape_geo_context(source_geo):
             async with page_session(verify_url=category_url) as (page, proxy):
-                urls = await module.get_article_urls(page)
-                items_found = len(urls)
+                used_url_cache = False
+
+                async def _collect_urls(*, refresh: bool = False) -> list[str]:
+                    nonlocal used_url_cache
+                    if refresh:
+                        url_list_cache.invalidate(source.id)
+                    collected: list[str] | None = None
+                    if not refresh and not force:
+                        collected = url_list_cache.get(source.id)
+                    if collected is None:
+                        collected = await module.get_article_urls(page)
+                        url_list_cache.set(source.id, collected)
+                        if refresh:
+                            used_url_cache = False
+                    else:
+                        used_url_cache = True
+                        log.info(
+                            "%s: skipped get_article_urls (cached %s URLs)",
+                            source.name,
+                            len(collected),
+                        )
+                    return collected
 
                 max_age = settings.scrape_articles_max_age_days
-                urls = [u for u in urls if _url_within_age(u, max_age)]
+
+                def _new_urls_to_parse(
+                    raw: list[str], known: set[str]
+                ) -> list[str]:
+                    filtered = [u for u in raw if _url_within_age(u, max_age)]
+                    if force:
+                        return filtered
+                    return [u for u in filtered if u not in known]
+
+                urls = await _collect_urls()
+                items_found = len(urls)
 
                 if force:
                     await _delete_predictions_by_urls(session, urls)
                     await session.commit()
                     log.info("%s: force re-scrape for %s URLs", source.name, len(urls))
-                else:
-                    existing = await _existing_urls(session, urls)
-                    urls = [u for u in urls if u not in existing]
+
+                known_urls = (
+                    set() if force else await _existing_urls(session, urls)
+                )
+                to_parse = _new_urls_to_parse(urls, known_urls)
+                if used_url_cache and not force and not to_parse:
+                    log.info(
+                        "%s: cache has no new URLs, refreshing listing",
+                        source.name,
+                    )
+                    urls = await _collect_urls(refresh=True)
+                    items_found = len(urls)
+                    known_urls = await _existing_urls(session, urls)
+                    to_parse = _new_urls_to_parse(urls, known_urls)
+
+                if not force:
+                    aged = [u for u in urls if _url_within_age(u, max_age)]
+                    db_skip = len(aged) - len(to_parse)
+                    if db_skip:
+                        log.info(
+                            "%s: skip %s URLs already in DB",
+                            source.name,
+                            db_skip,
+                        )
 
                 if limit:
-                    urls = urls[:limit]
+                    to_parse = to_parse[:limit]
 
-                log.info("%s: %s new URLs to parse", source.name, len(urls))
+                log.info("%s: %s new URLs to parse", source.name, len(to_parse))
 
-                for url in urls:
+                for url in to_parse:
                     parsed = None
-                    article_proxy = None
                     for attempt in range(2):
                         try:
-                            async with page_session() as (article_page, article_proxy):
-                                parsed = await module.parse_prediction(article_page, url)
+                            parsed = await module.parse_prediction(page, url)
                             break
                         except Exception as e:
-                            report_proxy_failure(e, article_proxy)
+                            report_proxy_failure(e, proxy)
                             if attempt == 0 and is_proxy_error(e):
                                 log.warning("Proxy error, retry: %s", url)
                                 continue
