@@ -145,12 +145,11 @@ async def _delete_predictions_by_urls(session: AsyncSession, urls: list[str]) ->
 
 async def scrape_source(
     session: AsyncSession,
-    source: Source,
+    snap: SourceSnap,
     limit: Optional[int] = None,
     *,
     force: bool = False,
 ) -> ScrapeLog:
-    snap = _snap_source(source)
     started = time.monotonic()
     items_found = 0
     items_new = 0
@@ -327,17 +326,18 @@ async def run_scrape(
                 q = q.where(Source.scraper_module == source_name)
             else:
                 q = q.where(Source.is_active.is_(True))
-            sources = (await session.scalars(q)).all()
+            rows = (await session.scalars(q)).all()
+            snaps = [_snap_source(s) for s in rows]
 
-            if not sources:
+            if not snaps:
                 if source_name:
                     log.warning("Source not found: %s", source_name)
                 else:
                     log.warning("No active sources found")
                 return
 
-            for source in sources:
-                await scrape_source(session, source, limit=limit, force=force)
+            for snap in snaps:
+                await scrape_source(session, snap, limit=limit, force=force)
 
 
 def main() -> None:
