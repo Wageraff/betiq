@@ -440,31 +440,36 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
 
 
 async def run_test_parse(urls: Optional[list[tuple[str, str]]] = None) -> None:
-    from src.scraper.utils.browser import browser_lifecycle, page_session
+    from src.scraper.utils.browser import (
+        browser_lifecycle,
+        page_session,
+        scrape_geo_context,
+    )
 
     pairs = urls or _TEST_URLS
     verify = SOURCE_CONFIG["base_url"].rstrip("/") + SOURCE_CONFIG["category_url"]
     geo = SOURCE_CONFIG.get("geo")
     async with browser_lifecycle():
-        async with page_session(verify_url=verify) as (page, _proxy):
-            for expected_sport, url in pairs:
-                print(f"\n{'=' * 60}\n{url}\n")
-                data = await parse_prediction(page, url)
-                if not data:
-                    print("  SKIP/FAIL")
-                    continue
-                ok = data["sport"] == expected_sport
-                print(f"  teams:      {data['team_home']} vs {data['team_away']}")
-                print(
-                    f"  sport:      {data['sport']} (expected {expected_sport}) "
-                    f"{'OK' if ok else 'MISMATCH'}"
-                )
-                print(f"  competition:{data.get('competition')}")
-                print(f"  match_date: {data['match_date']}")
-                print(f"  author:     {data.get('author')}")
-                print(f"  bets:       {len(data.get('bets') or [])}")
-                for b in data.get("bets") or []:
-                    print(f"    - {b.get('bet_pick')} @ {b.get('odds')}")
+        async with scrape_geo_context(geo):
+            async with page_session(verify_url=verify) as (page, _proxy):
+                for expected_sport, url in pairs:
+                    print(f"\n{'=' * 60}\n{url}\n")
+                    data = await parse_prediction(page, url)
+                    if not data:
+                        print("  SKIP/FAIL")
+                        continue
+                    ok = data["sport"] == expected_sport
+                    print(f"  teams:      {data['team_home']} vs {data['team_away']}")
+                    print(
+                        f"  sport:      {data['sport']} (expected {expected_sport}) "
+                        f"{'OK' if ok else 'MISMATCH'}"
+                    )
+                    print(f"  competition:{data.get('competition')}")
+                    print(f"  match_date: {data['match_date']}")
+                    print(f"  author:     {data.get('author')}")
+                    print(f"  bets:       {len(data.get('bets') or [])}")
+                    for b in data.get("bets") or []:
+                        print(f"    - {b.get('bet_pick')} @ {b.get('odds')}")
 
 
 def main() -> None:

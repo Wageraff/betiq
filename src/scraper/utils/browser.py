@@ -96,12 +96,46 @@ async def scrape_geo_context(geo: Optional[str]) -> AsyncIterator[None]:
         _geo_ctx.reset(token)
 
 
+def _is_transient_page_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(
+        x in msg
+        for x in (
+            "execution context was destroyed",
+            "navigation",
+            "target closed",
+            "frame was detached",
+        )
+    )
+
+
+async def _page_title_safe(page: Page, *, attempts: int = 6, delay_ms: int = 1500) -> str:
+    """title() падает, если страница ещё редиректится (Cloudflare, meta refresh)."""
+    last_exc: Optional[BaseException] = None
+    for _ in range(attempts):
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+        except Exception:
+            pass
+        try:
+            return (await page.title()) or ""
+        except Exception as e:
+            last_exc = e
+            if not _is_transient_page_error(e):
+                raise
+            await page.wait_for_timeout(delay_ms)
+    if last_exc:
+        log.debug("page.title failed after retries: %s", last_exc)
+    return ""
+
+
 async def wait_cloudflare(page: Page, base_ms: int = 3000) -> None:
-    title = (await page.title()) or ""
+    title = await _page_title_safe(page)
     lower = title.lower()
     if "just a moment" in lower or "attention required" in lower:
         log.info("Cloudflare challenge detected, waiting 10s")
         await page.wait_for_timeout(10_000)
+        await _page_title_safe(page, attempts=4)
     await page.wait_for_timeout(random.randint(base_ms, base_ms + 2000))
 
 
@@ -116,7 +150,7 @@ async def verify_proxy_access(page: Page, url: str) -> bool:
         return False
 
     await wait_cloudflare(page)
-    title = (await page.title()) or ""
+    title = await _page_title_safe(page)
     lower = title.lower()
     if "just a moment" in lower or "attention required" in lower:
         return False
