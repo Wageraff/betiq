@@ -275,8 +275,19 @@ _PARSE_JS = """
           prev = prev.previousElementSibling;
         }
       }
+      if (!pick && row) {
+        const rowText = (row.innerText || '').replace(/\\s+/g, ' ').trim();
+        const rm = rowText.match(
+          /((?:тотал|Тотал|победа|Победа)\\s+[^@\\n]{4,80}?)\\s*(?:@|за)?\\s*(\\d{1,2}[.,]\\d{2})/i
+        );
+        if (rm) {
+          pick = rm[1].trim();
+          if (!odds) odds = rm[2];
+        }
+      }
       pick = pick.replace(/^[Пп]рогноз(?=[А-ЯЁ])/u, '').trim();
       pick = pick.replace(/^прогноз\\s*/i, '').trim();
+      pick = pick.replace(/\\s*@\\s*[\\d.,]+\\s*$/,'').trim();
       if (isNoisePick(pick)) return;
       const key = pick + '|' + odds;
       if (pick && !seen.has(key)) {
@@ -354,9 +365,10 @@ _BET_PICK_NOISE = re.compile(
 )
 _TEXT_BET = re.compile(
     r"(тотал\s+(?:больше|меньше)\s*[\d.,]+(?:\s*(?:голов|мячей|очков))?|"
-    r"победа\s+[«\"]?[^«\"\n@]{3,70}[»\"]?)\s+за\s+(\d{1,2}[.,]\d{2})",
+    r"[Пп]обеда\s+[«\"]?[^«\"\n@]{3,70}[»\"]?)\s*(?:@|за\s+)?(\d{1,2}[.,]\d{2})",
     re.I,
 )
+_KF_SLUG = re.compile(r"kf-(\d)-(\d{2})(?:-|$)", re.I)
 
 _SLUG_SPORT_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"nhl|hokkej|hockey", re.I), "hockey"),
@@ -507,7 +519,11 @@ def _clean_bet_pick(pick: str) -> str:
     pick = _BET_PICK_NOISE.sub("", pick)
     pick = re.sub(r"^[Пп]рогноз(?=[А-ЯЁA-Z])", "", pick)
     pick = re.sub(r"^прогноз\s*", "", pick, flags=re.I)
-    pick = re.sub(r"\s+", " ", pick).strip(" ,-«»\"'")
+    pick = re.sub(r"\s*@\s*[\d.,]+\s*$", "", pick)
+    pick = re.sub(r"\s+за\s*[\d.,]+\s*$", "", pick, flags=re.I)
+    pick = re.sub(r"\s+", " ", pick).strip(" ,-«»\"'@")
+    if pick.count("«") > pick.count("»"):
+        pick = pick + "»"
     if re.search(r"мячей\s+за$|^\d+\s+мячей", pick, re.I):
         return ""
     if len(pick) < 5 or re.search(r"^прогноз\b", pick, re.I):
@@ -542,10 +558,40 @@ def _bets_from_full_text(full_text: str) -> list[tuple[str, str]]:
     return found
 
 
+def _bets_from_slug_kf(
+    url: str, full_text: str, *, team_away: str = ""
+) -> list[tuple[str, str]]:
+    """Шаблон prognoz-kf-1-42: коэффициент в slug, pick в тексте или Победа {гость}."""
+    m = _KF_SLUG.search(url)
+    if not m:
+        return []
+    odds_raw = f"{m.group(1)}.{m.group(2)}"
+    pick = ""
+    for pat in (
+        r"[Пп]обеда\s+([А-ЯЁ][а-яёA-Za-z\-']+(?:\s+[А-ЯЁ][а-яёA-Za-z\-']+)*)",
+        r"[Пп]обеда\s+[«\"]([^»\"]{3,60})[»\"]",
+        r"(тотал\s+(?:больше|меньше)\s+[\d.,]+\s*(?:голов|мячей)?)",
+    ):
+        fm = re.search(pat, full_text, re.I)
+        if fm:
+            pick = _clean_bet_pick(fm.group(1))
+            if pick:
+                break
+    if not pick and team_away:
+        if re.search(r"побед", full_text, re.I):
+            pick = _clean_bet_pick(f"Победа {team_away}")
+    if pick:
+        return [(pick, odds_raw)]
+    return []
+
+
 def _parse_bets(
     bets_dom: list[dict],
     bet_lines: list[str],
     full_text: str,
+    *,
+    url: str = "",
+    team_away: str = "",
 ) -> list[dict]:
     out: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -590,6 +636,12 @@ def _parse_bets(
         m = _BET_LINE.match(line.strip())
         if m:
             add(m.group(1).strip(), m.group(2))
+
+    if not out and url:
+        for pick, odds_raw in _bets_from_slug_kf(
+            url, full_text, team_away=team_away
+        ):
+            add(pick, odds_raw)
 
     return out
 
@@ -686,6 +738,8 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         raw.get("betsDom") or [],
         raw.get("betLines") or [],
         full_text,
+        url=url,
+        team_away=team_away,
     )
     if not bets:
         log.info("Skip %s: no bets with odds", url)
