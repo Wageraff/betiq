@@ -183,6 +183,28 @@ _PARSE_JS = """
     if (catText) competition = catText;
   }
 
+  let pageSport = '';
+  const sportRx = {
+    football: /\\/news\\/football/i,
+    hockey: /\\/news\\/hockey/i,
+    tennis: /\\/news\\/tennis/i,
+    basketball: /\\/news\\/basketball/i,
+    volleyball: /\\/news\\/volleyball/i,
+    handball: /\\/news\\/handball/i,
+  };
+  for (const a of document.querySelectorAll(
+    '.category-head a[href], .breadcrumb a[href], nav a[href], a[href*="/news/"]'
+  )) {
+    const href = a.getAttribute('href') || '';
+    for (const [sp, rx] of Object.entries(sportRx)) {
+      if (rx.test(href)) {
+        pageSport = sp;
+        break;
+      }
+    }
+    if (pageSport) break;
+  }
+
   const h1 = document.querySelector('h1')?.innerText?.trim() || headline || '';
   const meta = {
     title: getMeta('meta[property="og:title"]') || document.title || '',
@@ -213,27 +235,43 @@ _PARSE_JS = """
     content_html = htmlParts.filter(Boolean).join('\\n');
   }
 
+  const isNoisePick = (pick) => {
+    if (!pick || pick.length > 120) return true;
+    if (/прогноз\\s+и\\s+ставки|^прогноз$/i.test(pick)) return true;
+    if (/^анализ\\s+команд/i.test(pick)) return true;
+    return false;
+  };
+
   const collectBets = (root) => {
     const out = [];
     if (!root) return out;
     const seen = new Set();
-    root.querySelectorAll('span.h4, span.h4.mb-0').forEach((pickEl) => {
-      const pick = (pickEl.textContent || '').trim();
-      if (!pick || pick.length > 200) return;
-      let coefEl = pickEl.parentElement?.querySelector('.coef-tip');
-      if (!coefEl) {
-        let sib = pickEl.nextElementSibling;
-        while (sib) {
-          if (sib.classList && sib.classList.contains('coef-tip')) {
-            coefEl = sib;
-            break;
+    root.querySelectorAll('.coef-tip').forEach((coefEl) => {
+      const odds = (coefEl.textContent || '').trim();
+      if (!odds || !/[\\d]/.test(odds)) return;
+      let pick = '';
+      const row = coefEl.closest(
+        '.expert-tip, .d-flex, .row, [class*="forecast"], [class*="tip"]'
+      ) || coefEl.parentElement;
+      const pickEl = row?.querySelector(
+        'span.h4.mb-0, span.h4.d-none, span.h4:not(:has(.coef-tip))'
+      );
+      if (pickEl && !pickEl.contains(coefEl)) {
+        pick = (pickEl.textContent || '').trim();
+      }
+      if (!pick) {
+        let prev = coefEl.previousElementSibling;
+        while (prev && !pick) {
+          if (prev.matches && prev.matches('span.h4')) {
+            pick = (prev.textContent || '').trim();
           }
-          sib = sib.nextElementSibling;
+          prev = prev.previousElementSibling;
         }
       }
-      const odds = (coefEl?.textContent || '').trim();
+      pick = pick.replace(/^прогноз\\s*/i, '').trim();
+      if (isNoisePick(pick)) return;
       const key = pick + '|' + odds;
-      if (pick && odds && !seen.has(key)) {
+      if (pick && !seen.has(key)) {
         seen.add(key);
         out.push({ pick, odds });
       }
@@ -244,9 +282,9 @@ _PARSE_JS = """
   const betsDom = [];
   const seenBet = new Set();
   for (const root of [
+    document.querySelector('.expert-tip'),
     document.querySelector('#prediction-section'),
     document.querySelector('section.prediction-section'),
-    document.querySelector('.expert-tip'),
   ]) {
     for (const b of collectBets(root)) {
       const key = b.pick + '|' + b.odds;
@@ -275,6 +313,7 @@ _PARSE_JS = """
     team_away,
     kickoff,
     sport,
+    pageSport,
     competition,
     content_html,
     betLines,
@@ -300,6 +339,20 @@ _BET_LINE = re.compile(
 )
 
 _SLUG_SPLIT = re.compile(r"-(?:stavka|prognoz|stavki)-", re.I)
+
+_BET_PICK_NOISE = re.compile(
+    r"^прогноз\s+и\s+ставки\s*|^прогноз\s*|анализ\s+команд",
+    re.I,
+)
+
+_SLUG_SPORT_HINTS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"nhl|hokkej|hockey", re.I), "hockey"),
+    (re.compile(r"prosteev|rolan|atp|wta|tennis", re.I), "tennis"),
+    (re.compile(r"basket|nba|vtb", re.I), "basketball"),
+    (re.compile(r"volley|voley", re.I), "volleyball"),
+    (re.compile(r"handball|gandbol", re.I), "handball"),
+    (re.compile(r"tovarish|chempionat|futbol|football", re.I), "football"),
+]
 
 
 def _sport_from_url(url: str) -> str:
@@ -336,6 +389,36 @@ def _date_from_news_path(url: str) -> Optional[date]:
     return parse_date_from_url(url, geo=SOURCE_CONFIG.get("geo"))
 
 
+def _clean_team_display(name: str) -> str:
+    name = sanitize_team_label((name or "").strip())
+    return name.strip(" .,;:")
+
+
+def _sport_from_slug(url: str) -> str:
+    slug = urlparse(url).path.lower()
+    for pat, sport in _SLUG_SPORT_HINTS:
+        if pat.search(slug):
+            return sport
+    return ""
+
+
+def _sport_from_competition(comp: str) -> str:
+    c = (comp or "").lower()
+    if re.search(r"нхл|\bnhl\b|хоккей|khl", c):
+        return "hockey"
+    if re.search(r"атп|\bwta\b|простеев|rolan|теннис|tennis", c):
+        return "tennis"
+    if re.search(r"баскет|втб|\bnba\b", c):
+        return "basketball"
+    if re.search(r"волейбол|volleyball", c):
+        return "volleyball"
+    if re.search(r"гандбол|handball", c):
+        return "handball"
+    if re.search(r"товарищ|футбол|чемпионат|football|liga|лига", c):
+        return "football"
+    return ""
+
+
 def _teams_from_slug(url: str) -> tuple[str, str]:
     slug = urlparse(url).path.rstrip("/").split("/")[-1].lower()
     head = _SLUG_SPLIT.split(slug, maxsplit=1)[0]
@@ -353,8 +436,8 @@ def _teams_from_slug(url: str) -> tuple[str, str]:
 def _resolve_teams(raw: dict, url: str) -> tuple[str, str]:
     candidates: list[tuple[str, str]] = []
 
-    rh = sanitize_team_label((raw.get("team_home") or "").strip())
-    ra = sanitize_team_label((raw.get("team_away") or "").strip())
+    rh = _clean_team_display(raw.get("team_home") or "")
+    ra = _clean_team_display(raw.get("team_away") or "")
     if rh and ra:
         candidates.append((rh, ra))
 
@@ -368,8 +451,8 @@ def _resolve_teams(raw: dict, url: str) -> tuple[str, str]:
     candidates.append(_teams_from_slug(url))
 
     for home, away in candidates:
-        home = sanitize_team_label(home)
-        away = sanitize_team_label(away)
+        home = _clean_team_display(home)
+        away = _clean_team_display(away)
         if _is_valid_teams(home, away):
             return home, away
     return "", ""
@@ -401,9 +484,12 @@ def _parse_bets(
     seen: set[tuple[str, str]] = set()
 
     def add(pick: str, odds_raw: str) -> None:
-        pick = re.sub(r"\s+", " ", pick).strip(" ,-")
+        pick = _BET_PICK_NOISE.sub("", pick)
+        pick = re.sub(r"\s+", " ", pick).strip(" ,-«»\"'")
+        if not pick or re.search(r"^прогноз\b", pick, re.I):
+            return
         odds = parse_odds(odds_raw)
-        if not pick or odds is None:
+        if odds is None:
             return
         key = (pick, str(odds))
         if key in seen:
@@ -448,18 +534,24 @@ def _parse_bets(
 
 
 def _resolve_sport(raw: dict, url: str) -> str:
+    text_sample = " ".join(
+        [
+            raw.get("competition") or "",
+            raw.get("h1") or "",
+            (raw.get("domText") or "")[:2000],
+            (raw.get("articleBody") or "")[:2000],
+        ]
+    )
     for candidate in (
         normalize_sport(raw.get("sport") or ""),
+        normalize_sport(raw.get("pageSport") or ""),
         _URL_SPORT_HINT.get(url.rstrip("/")),
         _sport_from_url(url),
+        _sport_from_slug(url),
+        _sport_from_competition(text_sample),
     ):
         if candidate:
             return candidate
-    slug = urlparse(url).path.lower()
-    if "nhl" in slug:
-        return "hockey"
-    if "rolan" in slug or "prosteev" in slug:
-        return "tennis"
     return ""
 
 
@@ -526,7 +618,7 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         log.warning("Skip %s: could not resolve sport", url)
         return None
 
-    competition = (raw.get("competition") or "").strip()
+    competition = (raw.get("competition") or "").strip().rstrip(".")
 
     bets = _parse_bets(
         raw.get("betsDom") or [],
