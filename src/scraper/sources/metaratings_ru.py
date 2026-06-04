@@ -161,26 +161,25 @@ _PARSE_JS = """
   };
 
   let author = '';
-  const authorSelectors = [
-    '.PostAuthor a',
-    '.PostAuthor',
-    '[class*="PostAuthor"] a',
-    '[class*="PostAuthor"]',
-    '[class*="post-author"] a',
-    '[class*="post-author"]',
-    'a[href*="/prognozisty/"]',
-    'a[href*="/author/"]',
-  ];
-  for (const sel of authorSelectors) {
-    const el = document.querySelector(sel);
-    if (!el) continue;
-    const t = (el.textContent || '').trim();
-    if (t && t.length < 80) {
-      author = t;
-      break;
+  const authorBlock = document.querySelector('.PostAuthor, [class*="PostAuthor"]');
+  const authorLink = authorBlock?.querySelector(
+    'a[href*="prognozisty"], a[href*="author"], a[href*="expert"]'
+  ) || document.querySelector('a[href*="/prognozisty/"]');
+  if (authorLink) {
+    author = (authorLink.textContent || '').trim();
+  } else if (authorBlock) {
+    const nameNode = authorBlock.querySelector(
+      '[class*="name"] a, [class*="Name"] a, [class*="name"], [class*="Name"], h3, h4, strong'
+    );
+    if (nameNode) {
+      author = (nameNode.textContent || '').trim();
     }
   }
   author = author.replace(/^Эксперт:?\\s*/i, '').trim();
+  if (author) {
+    author = author.split(/\\d{1,2}\\.\\d{1,2}\\.\\d{4}/)[0].trim();
+    author = author.split(/Статистика/i)[0].trim();
+  }
   if (!author && event) {
     const a = event.author;
     if (a && typeof a === 'object' && a.name) author = String(a.name).trim();
@@ -237,6 +236,25 @@ _BET_LINE = re.compile(
     r"^(?:Прогноз|Ставка)\s*[—–-]\s*(.+?)\s+с\s+коэффициентом\s+([\d.,]+)",
     re.I,
 )
+
+_AUTHOR_NOISE = re.compile(
+    r"Статистика|ROI\s*:|месяца\s*:|^\d",
+    re.I,
+)
+
+
+def _sanitize_author(name: str) -> str:
+    """PostAuthor на metaratings склеивает имя с датой и блоком статистики."""
+    s = (name or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"^Эксперт:?\s*", "", s, flags=re.I)
+    s = re.split(r"\d{1,2}\.\d{1,2}\.\d{4}", s, maxsplit=1)[0].strip()
+    s = _AUTHOR_NOISE.split(s, maxsplit=1)[0].strip()
+    s = re.sub(r"\s+", " ", s)
+    if len(s) > 50:
+        s = s[:50].strip()
+    return s
 
 
 def _sport_from_url(url: str) -> str:
@@ -507,7 +525,7 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         log.info("Skip %s: no bets with odds", url)
         return None
 
-    author = (raw.get("author") or "").strip()
+    author = _sanitize_author(raw.get("author") or "")
 
     return {
         "source_url": url,
