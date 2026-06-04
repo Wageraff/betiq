@@ -26,7 +26,7 @@ from sqlalchemy import delete, select
 from src.config import setup_logging
 from src.db.models import Match, Prediction, PredictionBet, Source
 from src.db.session import async_session_factory
-from src.scraper.engine import _persist_prediction
+from src.scraper.engine import _persist_prediction, _snap_source
 from src.scraper.sources import load_source_module
 from src.scraper.utils.browser import (
     browser_lifecycle,
@@ -90,15 +90,15 @@ async def ingest_urls(urls: list[str], *, force: bool, dry_run: bool) -> None:
                     results.append((url, None, None))
                     continue
 
-                geo = (source.geo or "GB").upper()
+                snap = _snap_source(source)
                 module = load_source_module(module_name)
 
                 if force and not dry_run:
                     await _delete_url(session, url)
                     await session.commit()
 
-                log.info("Parsing %s via %s (geo=%s)", url, module_name, geo)
-                async with scrape_geo_context(geo):
+                log.info("Parsing %s via %s (geo=%s)", url, module_name, snap.geo)
+                async with scrape_geo_context(snap.geo):
                     async with page_session() as (page, _proxy):
                         data = await module.parse_prediction(page, url)
 
@@ -125,7 +125,7 @@ async def ingest_urls(urls: list[str], *, force: bool, dry_run: bool) -> None:
                     results.append((url, None, key))
                     continue
 
-                saved = await _persist_prediction(session, source, data)
+                saved = await _persist_prediction(session, snap, data)
                 if saved:
                     await session.commit()
                     pred = await session.scalar(
