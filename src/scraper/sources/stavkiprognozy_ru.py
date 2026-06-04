@@ -273,51 +273,66 @@ _PARSE_JS = """
   }
 
   const SKIP_IDS = ['fc-coeffs', 'fc-private-matches', 'last-matches', 'fc-live'];
-  const shouldSkipGroup = (fg) => {
-    if (!fg) return true;
-    return SKIP_IDS.includes(fg.id);
-  };
+  const NOISE_SEL = [
+    '.forecast-bar', '.alternate-item', '.alternate-item-title',
+    '.sinfor-main-panel-topbar', 'script', 'style', 'iframe', 'nav', 'footer',
+  ].join(', ');
 
   const stripSkipBlocks = (root) => {
     const clone = root.cloneNode(true);
     for (const id of SKIP_IDS) {
       clone.querySelectorAll('#' + id).forEach((el) => el.remove());
     }
-    clone.querySelectorAll(
-      '.forecast-bar, .alternate-item-title, script, style, iframe'
-    ).forEach((el) => el.remove());
+    clone.querySelectorAll(NOISE_SEL).forEach((el) => el.remove());
     return clone;
   };
 
-  const extractGroupText = (fg) => {
-    const t = (stripSkipBlocks(fg).innerText || '').trim().replace(/\\s+/g, ' ');
-    return t.length > 40 ? t : '';
+  const rootText = (root) => {
+    if (!root) return '';
+    return (stripSkipBlocks(root).innerText || '').trim().replace(/\\s+/g, ' ');
   };
-
-  const extractGroupHtml = (fg) => stripSkipBlocks(fg).innerHTML?.trim() || '';
 
   const textParts = [];
   let content_html = '';
-  const box = document.querySelector('.box-item-inner, .box-item .box-item-inner');
-  let groups = box ? [...box.querySelectorAll('.form-group-xl')] : [];
-  if (!groups.length) {
-    groups = box
-      ? [...box.querySelectorAll('.form-group')]
-      : [...document.querySelectorAll('.box-item-inner .form-group-xl, .form-group-xl')];
-  }
-  groups = groups.filter((fg) => !fg.parentElement?.closest('.form-group-xl'));
-  for (const fg of groups) {
-    if (shouldSkipGroup(fg)) continue;
-    const t = extractGroupText(fg);
-    if (t) textParts.push(t);
+  const box =
+    document.querySelector('.box-item-inner')
+    || document.querySelector('.box-item .box-item-inner')
+    || document.querySelector('.box-item');
+
+  if (box) {
+    const whole = rootText(box);
+    if (whole.length > 200) textParts.push(whole);
     if (!articleBody) {
-      const html = extractGroupHtml(fg);
-      if (html && html.length > 80) {
-        content_html = content_html ? content_html + '\\n' + html : html;
+      content_html = stripSkipBlocks(box).innerHTML?.trim() || '';
+    }
+  }
+
+  if (!textParts.length) {
+    for (const fg of document.querySelectorAll('.form-group-xl, .form-group')) {
+      if (SKIP_IDS.includes(fg.id)) continue;
+      const t = rootText(fg);
+      if (t.length > 80) textParts.push(t);
+      if (!articleBody && !content_html && t.length > 80) {
+        content_html = stripSkipBlocks(fg).innerHTML?.trim() || '';
       }
     }
   }
-  const domText = textParts.join('\\n\\n').trim();
+
+  if (!textParts.length) {
+    const h1El = document.querySelector('h1');
+    let el = h1El?.nextElementSibling;
+    const walk = [];
+    while (el && walk.join('').length < 80000) {
+      const tag = (el.tagName || '').toLowerCase();
+      if (tag === 'h1' || el.classList?.contains('sinfor-main-panel-topbar')) break;
+      const t = rootText(el);
+      if (t.length > 80) walk.push(t);
+      el = el.nextElementSibling;
+    }
+    if (walk.length) textParts.push(walk.join('\\n\\n'));
+  }
+
+  const domText = [...new Set(textParts)].join('\\n\\n').trim();
 
   const betsDom = [];
   const seenBet = new Set();
@@ -610,6 +625,44 @@ def _resolve_competition(raw: dict) -> str:
     return comp
 
 
+async def _activate_prognoz_tab(page: Any) -> None:
+    """Контент прогноза часто во вкладке «Прогноз» — без клика box-item-inner пустой."""
+    selectors = (
+        'a[href="#prognoz"]',
+        'a[href="#forecast"]',
+        '[data-bs-toggle="tab"][href*="prognoz"]',
+        '.nav-tabs a:has-text("Прогноз")',
+        'button:has-text("Прогноз")',
+    )
+    for sel in selectors:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0:
+                await loc.click(timeout=5000)
+                await page.wait_for_timeout(600)
+                break
+        except Exception:
+            continue
+    else:
+        try:
+            tab = page.get_by_text("Прогноз", exact=True).first
+            if await tab.count() > 0:
+                await tab.click(timeout=5000)
+                await page.wait_for_timeout(600)
+        except Exception:
+            pass
+    try:
+        await page.wait_for_function(
+            """() => {
+              const b = document.querySelector('.box-item-inner, .box-item');
+              return b && (b.innerText || '').replace(/\\s+/g, ' ').trim().length > 400;
+            }""",
+            timeout=15_000,
+        )
+    except Exception:
+        pass
+
+
 async def get_article_urls(page: Any) -> list[str]:
     from src.scraper.utils.browser import wait_cloudflare
 
@@ -639,14 +692,7 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
 
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
     await wait_cloudflare(page)
-    try:
-        await page.wait_for_selector(
-            ".box-item-inner, .form-group-xl",
-            timeout=20_000,
-            state="attached",
-        )
-    except Exception:
-        pass
+    await _activate_prognoz_tab(page)
 
     raw = await page.evaluate(_PARSE_JS) or {}
     title = raw.get("h1") or ""
@@ -672,9 +718,14 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
     elif dom_text:
         full_text = dom_text
         text_source = "box-item-inner"
-    else:
-        full_text = html_to_plain_text(clean_article_html(content_html))
+    elif content_html:
+        full_text = html_to_plain_text(content_html) or html_to_plain_text(
+            clean_article_html(content_html)
+        )
         text_source = "form-group-html"
+    else:
+        full_text = ""
+        text_source = "none"
 
     sport = _resolve_sport(raw, url)
     if not sport:
@@ -713,6 +764,11 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         "event_meta": raw.get("event") or {},
         "article_meta": raw.get("article") or {},
         "text_source": text_source,
+        "text_debug": {
+            "articleBody": len(article_body),
+            "domText": len(dom_text),
+            "content_html": len(content_html or ""),
+        },
     }
 
 
@@ -751,6 +807,12 @@ async def run_test_parse(urls: Optional[list[tuple[str, str]]] = None) -> None:
                     print(
                         f"  full_text:  {len(ft)} chars ({data.get('text_source', '?')})"
                     )
+                    if not ft and data.get("text_debug"):
+                        d = data["text_debug"]
+                        print(
+                            f"  debug:      articleBody={d.get('articleBody')} "
+                            f"domText={d.get('domText')} html={d.get('content_html')}"
+                        )
                     if preview:
                         print(f"  preview:    {preview}")
                     print(f"  bets:       {len(data.get('bets') or [])}")
