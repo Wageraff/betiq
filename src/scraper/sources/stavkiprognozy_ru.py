@@ -275,33 +275,49 @@ _PARSE_JS = """
   const SKIP_IDS = ['fc-coeffs', 'fc-private-matches', 'last-matches', 'fc-live'];
   const shouldSkipGroup = (fg) => {
     if (!fg) return true;
-    for (const id of SKIP_IDS) {
-      if (fg.id === id || fg.querySelector('#' + id)) return true;
-    }
-    return false;
+    return SKIP_IDS.includes(fg.id);
   };
 
+  const stripSkipBlocks = (root) => {
+    const clone = root.cloneNode(true);
+    for (const id of SKIP_IDS) {
+      clone.querySelectorAll('#' + id).forEach((el) => el.remove());
+    }
+    clone.querySelectorAll(
+      '.forecast-bar, .alternate-item-title, script, style, iframe'
+    ).forEach((el) => el.remove());
+    return clone;
+  };
+
+  const extractGroupText = (fg) => {
+    const t = (stripSkipBlocks(fg).innerText || '').trim().replace(/\\s+/g, ' ');
+    return t.length > 40 ? t : '';
+  };
+
+  const extractGroupHtml = (fg) => stripSkipBlocks(fg).innerHTML?.trim() || '';
+
   const textParts = [];
-  const box = document.querySelector('.box-item-inner');
-  if (box) {
-    box.querySelectorAll('.form-group-xl').forEach((fg) => {
-      if (shouldSkipGroup(fg)) return;
-      const t = (fg.innerText || '').trim();
-      if (t && t.length > 30) textParts.push(t);
-    });
+  let content_html = '';
+  const box = document.querySelector('.box-item-inner, .box-item .box-item-inner');
+  let groups = box ? [...box.querySelectorAll('.form-group-xl')] : [];
+  if (!groups.length) {
+    groups = box
+      ? [...box.querySelectorAll('.form-group')]
+      : [...document.querySelectorAll('.box-item-inner .form-group-xl, .form-group-xl')];
+  }
+  groups = groups.filter((fg) => !fg.parentElement?.closest('.form-group-xl'));
+  for (const fg of groups) {
+    if (shouldSkipGroup(fg)) continue;
+    const t = extractGroupText(fg);
+    if (t) textParts.push(t);
+    if (!articleBody) {
+      const html = extractGroupHtml(fg);
+      if (html && html.length > 80) {
+        content_html = content_html ? content_html + '\\n' + html : html;
+      }
+    }
   }
   const domText = textParts.join('\\n\\n').trim();
-
-  let content_html = '';
-  if (!articleBody && box) {
-    const htmlParts = [];
-    box.querySelectorAll('.form-group-xl').forEach((fg) => {
-      if (shouldSkipGroup(fg)) return;
-      const html = fg.innerHTML?.trim();
-      if (html) htmlParts.push(html);
-    });
-    content_html = htmlParts.join('\\n');
-  }
 
   const betsDom = [];
   const seenBet = new Set();
@@ -468,7 +484,9 @@ def _clean_bet_pick(pick: str) -> str:
 def _bet_pick_key(pick: str, odds: str) -> str:
     p = pick.lower()
     p = re.sub(r"мячей", "голов", p)
-    p = re.sub(r"[«»\"']", "", p)
+    p = re.sub(r"[«»\"'–—]", "", p)
+    p = re.sub(r"\s*фор[аы]\s*1\b", " фора1 ", p)
+    p = re.sub(r"\s*фор[аы]\s*2\b", " фора2 ", p)
     p = re.sub(r"\s+", " ", p).strip()
     return f"{p}|{odds}"
 
@@ -621,6 +639,14 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
 
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
     await wait_cloudflare(page)
+    try:
+        await page.wait_for_selector(
+            ".box-item-inner, .form-group-xl",
+            timeout=20_000,
+            state="attached",
+        )
+    except Exception:
+        pass
 
     raw = await page.evaluate(_PARSE_JS) or {}
     title = raw.get("h1") or ""
