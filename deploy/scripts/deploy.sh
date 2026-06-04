@@ -30,6 +30,11 @@ echo "==> alembic"
 export PYTHONPATH="$APP_DIR"
 "$PY" -m alembic upgrade head
 
+if [[ -d "$APP_DIR/admin-ui" ]] && command -v npm &>/dev/null; then
+  echo "==> admin-ui build"
+  (cd "$APP_DIR/admin-ui" && npm ci --silent 2>/dev/null || npm install --silent) && npm run build
+fi
+
 echo "==> restart services (if installed)"
 for unit in betiq-api betiq-scheduler betiq-telegram; do
   if systemctl list-unit-files "$unit.service" &>/dev/null; then

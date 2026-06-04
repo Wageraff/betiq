@@ -46,18 +46,44 @@ class Source(Base):
     health_checks: Mapped[List["HealthCheck"]] = relationship(back_populates="source")
 
 
+class Team(Base):
+    __tablename__ = "teams"
+    __table_args__ = (Index("idx_teams_sport", "sport"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    normalized_key: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    sport: Mapped[Optional[str]] = mapped_column(String(50))
+    logo_path: Mapped[Optional[str]] = mapped_column(String(500))
+    aliases: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Match(Base):
     __tablename__ = "matches"
     __table_args__ = (
         Index("idx_matches_match_key", "match_key"),
         Index("idx_matches_match_date", "match_date"),
         Index("idx_matches_sport", "sport"),
+        Index("idx_matches_team_home_id", "team_home_id"),
+        Index("idx_matches_team_away_id", "team_away_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     match_key: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)
     team_home: Mapped[str] = mapped_column(String(150), nullable=False)
     team_away: Mapped[str] = mapped_column(String(150), nullable=False)
+    team_home_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="SET NULL")
+    )
+    team_away_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="SET NULL")
+    )
     sport: Mapped[Optional[str]] = mapped_column(String(50))
     competition: Mapped[Optional[str]] = mapped_column(String(150))
     match_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -75,6 +101,12 @@ class Match(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    team_home_ref: Mapped[Optional["Team"]] = relationship(
+        foreign_keys=[team_home_id], lazy="joined"
+    )
+    team_away_ref: Mapped[Optional["Team"]] = relationship(
+        foreign_keys=[team_away_id], lazy="joined"
+    )
     predictions: Mapped[List["Prediction"]] = relationship(back_populates="match")
 
 

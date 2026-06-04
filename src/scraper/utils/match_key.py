@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Match
+from src.db.teams import get_or_create_team
 
 CLUB_PREFIXES = re.compile(r"\b(fc|fk|sc|ac|sk|bk|if|afc|cf|rc)\b", re.I)
 
@@ -119,6 +120,14 @@ def _as_date(value: date | datetime) -> date:
     return value
 
 
+async def _link_teams(session: AsyncSession, match: Match, data: dict) -> None:
+    sport = data.get("sport")
+    home = await get_or_create_team(session, data["team_home"], sport=sport)
+    away = await get_or_create_team(session, data["team_away"], sport=sport)
+    match.team_home_id = home.id
+    match.team_away_id = away.id
+
+
 async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
     """Найти существующий матч по ключу или создать новый."""
     match_dt: datetime = data["match_date"]
@@ -128,6 +137,7 @@ async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
     match = await session.scalar(select(Match).where(Match.match_key == key))
     if match:
         _refresh_match_fields(match, data)
+        await _link_teams(session, match, data)
         return match
 
     home_norm = normalize_team_name(data["team_home"])
@@ -144,6 +154,7 @@ async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
     )
     if match:
         _refresh_match_fields(match, data)
+        await _link_teams(session, match, data)
         return match
 
     match = Match(
@@ -157,4 +168,5 @@ async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
     )
     session.add(match)
     await session.flush()
+    await _link_teams(session, match, data)
     return match

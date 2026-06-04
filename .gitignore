@@ -28,3 +28,6 @@ data/*.db-shm
 
 # Local notes (not for repo)
 instructions/
+
+# Admin UI
+admin-ui/node_modules/
