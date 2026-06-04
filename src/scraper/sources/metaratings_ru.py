@@ -1,6 +1,6 @@
 """Парсер metaratings.ru — разделы /prognozy/{sport}/.
 
-См. instructions/metaratings_ru.md: SportsEvent (JSON-LD), PostAuthor, workarea-text, versus-info.
+См. instructions/metaratings_ru.md: SportsEvent + NewsArticle (JSON-LD), versus-info, workarea-text (ставки).
 """
 from __future__ import annotations
 
@@ -93,18 +93,24 @@ _PARSE_JS = """
 () => {
   const getMeta = (sel) => document.querySelector(sel)?.getAttribute('content')?.trim() || '';
 
-  const findSportsEvent = (obj) => {
+  const hasType = (obj, typeName) => {
+    const t = obj && obj['@type'];
+    if (!t) return false;
+    if (t === typeName) return true;
+    return Array.isArray(t) && t.includes(typeName);
+  };
+
+  const findByType = (obj, typeName) => {
     if (!obj) return null;
     if (Array.isArray(obj)) {
       for (const item of obj) {
-        const found = findSportsEvent(item);
+        const found = findByType(item, typeName);
         if (found) return found;
       }
       return null;
     }
-    const t = obj['@type'];
-    if (t === 'SportsEvent' || (Array.isArray(t) && t.includes('SportsEvent'))) return obj;
-    if (obj['@graph']) return findSportsEvent(obj['@graph']);
+    if (hasType(obj, typeName)) return obj;
+    if (obj['@graph']) return findByType(obj['@graph'], typeName);
     return null;
   };
 
@@ -114,13 +120,40 @@ _PARSE_JS = """
     return (t.name || '').trim();
   };
 
+  const personName = (p) => {
+    if (!p) return '';
+    if (typeof p === 'string') return p.trim();
+    if (Array.isArray(p)) {
+      for (const item of p) {
+        const n = personName(item);
+        if (n) return n;
+      }
+      return '';
+    }
+    return (p.name || '').trim();
+  };
+
   let event = null;
+  let article = null;
   for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
     try {
       const data = JSON.parse(script.textContent || '');
-      event = findSportsEvent(data);
-      if (event) break;
+      if (!event) event = findByType(data, 'SportsEvent');
+      if (!article) article = findByType(data, 'NewsArticle');
     } catch (e) {}
+  }
+
+  let author = '';
+  let articleBody = '';
+  let headline = '';
+  let datePublished = '';
+  if (article) {
+    author = personName(article.author);
+    if (typeof article.articleBody === 'string') {
+      articleBody = article.articleBody.trim();
+    }
+    headline = (article.headline || article.name || '').trim();
+    datePublished = article.datePublished || article.dateModified || '';
   }
 
   let team_home = '';
@@ -154,56 +187,40 @@ _PARSE_JS = """
       || document.querySelector('[itemprop="awayTeam"]')?.textContent?.trim() || '';
   }
 
-  const h1 = document.querySelector('h1')?.innerText?.trim() || '';
+  const h1 = document.querySelector('h1')?.innerText?.trim() || headline || '';
   const meta = {
     title: getMeta('meta[property="og:title"]') || document.title || '',
     description: getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]'),
   };
 
-  let author = '';
-  const authorBlock = document.querySelector('.PostAuthor, [class*="PostAuthor"]');
-  const authorLink = authorBlock?.querySelector(
-    'a[href*="prognozisty"], a[href*="author"], a[href*="expert"]'
-  ) || document.querySelector('a[href*="/prognozisty/"]');
-  if (authorLink) {
-    author = (authorLink.textContent || '').trim();
-  } else if (authorBlock) {
-    const nameNode = authorBlock.querySelector(
-      '[class*="name"] a, [class*="Name"] a, [class*="name"], [class*="Name"], h3, h4, strong'
-    );
-    if (nameNode) {
-      author = (nameNode.textContent || '').trim();
-    }
-  }
-  author = author.replace(/^Эксперт:?\\s*/i, '').trim();
-  if (author) {
-    author = author.split(/\\d{1,2}\\.\\d{1,2}\\.\\d{4}/)[0].trim();
-    author = author.split(/Статистика/i)[0].trim();
-  }
-  if (!author && event) {
-    const a = event.author;
-    if (a && typeof a === 'object' && a.name) author = String(a.name).trim();
-    else if (typeof a === 'string') author = a.trim();
-  }
-
   const versusEl = document.querySelector('.versus-info.workarea-text, .versus-info');
   const versusText = versusEl?.innerText?.trim().replace(/\\s+/g, ' ') || '';
 
-  const contentParts = [];
-  for (const block of document.querySelectorAll('.workarea-text')) {
-    if (block.closest('.versus-info')) continue;
-    const clone = block.cloneNode(true);
-    clone.querySelectorAll('script, style, iframe').forEach((el) => el.remove());
-    const html = clone.innerHTML?.trim();
-    if (html) contentParts.push(html);
+  let content_html = '';
+  if (!articleBody) {
+    const contentParts = [];
+    for (const block of document.querySelectorAll('.workarea-text')) {
+      if (block.closest('.versus-info')) continue;
+      const clone = block.cloneNode(true);
+      clone.querySelectorAll('script, style, iframe').forEach((el) => el.remove());
+      const html = clone.innerHTML?.trim();
+      if (html) contentParts.push(html);
+    }
+    content_html = contentParts.join('\\n');
   }
-  const content_html = contentParts.join('\\n');
 
   const betLines = [];
-  for (const block of document.querySelectorAll('.workarea-text')) {
-    for (const el of block.querySelectorAll('p, li, strong')) {
-      const t = (el.innerText || '').trim().replace(/\\s+/g, ' ');
-      if (/^(Прогноз|Ставка)\\s*[—–-]/i.test(t)) betLines.push(t);
+  const betSource = articleBody || '';
+  for (const line of betSource.split(/\\n+/)) {
+    const t = line.trim().replace(/\\s+/g, ' ');
+    if (/^(Прогноз|Ставка)\\s*[—–-]/i.test(t)) betLines.push(t);
+  }
+  if (!betLines.length) {
+    for (const block of document.querySelectorAll('.workarea-text')) {
+      for (const el of block.querySelectorAll('p, li, strong')) {
+        const t = (el.innerText || '').trim().replace(/\\s+/g, ' ');
+        if (/^(Прогноз|Ставка)\\s*[—–-]/i.test(t)) betLines.push(t);
+      }
     }
   }
 
@@ -211,6 +228,8 @@ _PARSE_JS = """
     h1,
     meta,
     author,
+    articleBody,
+    datePublished,
     versusText,
     team_home,
     team_away,
@@ -220,6 +239,7 @@ _PARSE_JS = """
     content_html,
     betLines,
     event,
+    article,
   };
 }
 """
@@ -502,8 +522,13 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         log.warning("Skip %s: no match_date", url)
         return None
 
+    article_body = (raw.get("articleBody") or "").strip()
     content_html = raw.get("content_html") or ""
-    full_text = html_to_plain_text(clean_article_html(content_html))
+    if article_body:
+        full_text = article_body
+        content_html = content_html or ""
+    else:
+        full_text = html_to_plain_text(clean_article_html(content_html))
 
     sport = _resolve_sport(raw, url)
     if not sport:
@@ -526,6 +551,12 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         return None
 
     author = _sanitize_author(raw.get("author") or "")
+    published_at = match_date
+    pub_raw = (raw.get("datePublished") or "").strip()
+    if pub_raw:
+        pub_dt = parse_schema_start_date(pub_raw, geo=SOURCE_CONFIG.get("geo"))
+        if pub_dt:
+            published_at = pub_dt
 
     return {
         "source_url": url,
@@ -537,11 +568,12 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         "match_date": match_date,
         "author": author,
         "full_text": full_text,
-        "published_at": match_date,
+        "published_at": published_at,
         "bets": bets,
         "meta": raw.get("meta"),
-        "content_html": clean_article_html(content_html),
+        "content_html": clean_article_html(content_html) if content_html else "",
         "event_meta": raw.get("event") or {},
+        "article_meta": raw.get("article") or {},
     }
 
 
