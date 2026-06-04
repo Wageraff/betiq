@@ -67,8 +67,8 @@ export default function TeamsPage() {
     <>
       <h2>Справочник команд / соперников</h2>
       <p style={{ color: "var(--muted)" }}>
-        Записи создаются автоматически при парсинге. Здесь можно править отображаемое
-        имя и загрузить картинку.
+        Справочник ведётся на английском (как ключи match_key). При парсинге варианты
+        с сайтов (RO/RU) попадают в алиасы. Названия на карточках матчей — как на источнике.
       </p>
       <div className="filters panel">
         <input
@@ -87,8 +87,8 @@ export default function TeamsPage() {
             <thead>
               <tr>
                 <th></th>
-                <th>Название</th>
-                <th>Ключ</th>
+                <th>Название (EN)</th>
+                <th>Ключ (normalized)</th>
               </tr>
             </thead>
             <tbody>
@@ -136,7 +136,7 @@ export default function TeamsPage() {
                 />
               )}
               <label style={{ display: "block", marginBottom: "0.5rem" }}>
-                Отображаемое имя
+                Название (англ., для справочника)
                 <input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
@@ -152,7 +152,7 @@ export default function TeamsPage() {
                 />
               </label>
               <label style={{ display: "block", marginBottom: "0.5rem" }}>
-                Алиасы (текст)
+                Алиасы (RO/RU/другие написания с сайтов)
                 <textarea
                   value={aliases}
                   onChange={(e) => setAliases(e.target.value)}

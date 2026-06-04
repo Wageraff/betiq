@@ -62,11 +62,37 @@ async def _link_teams(session: AsyncSession, match: Match, data: dict) -> None:
     match.team_away_id = away.id
 
 
+async def _find_by_normalized_teams(
+    session: AsyncSession,
+    home_norm: str,
+    away_norm: str,
+    day: date,
+) -> Match | None:
+    """Матч с теми же нормализованными командами ±1 день (старый match_key в БД может отличаться)."""
+    day_start = datetime.combine(day - timedelta(days=1), datetime.min.time())
+    day_end = datetime.combine(day + timedelta(days=1), datetime.max.time())
+    candidates = await session.scalars(
+        select(Match).where(
+            Match.match_date >= day_start,
+            Match.match_date <= day_end,
+        )
+    )
+    for match in candidates:
+        if (
+            normalize_team_name(match.team_home) == home_norm
+            and normalize_team_name(match.team_away) == away_norm
+        ):
+            return match
+    return None
+
+
 async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
     """Найти существующий матч по ключу или создать новый."""
     match_dt: datetime = data["match_date"]
     day = _as_date(match_dt)
     key = build_match_key(data["team_home"], data["team_away"], day)
+    home_norm = normalize_team_name(data["team_home"])
+    away_norm = normalize_team_name(data["team_away"])
 
     match = await session.scalar(select(Match).where(Match.match_key == key))
     if match:
@@ -74,18 +100,7 @@ async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
         await _link_teams(session, match, data)
         return match
 
-    home_norm = normalize_team_name(data["team_home"])
-    away_norm = normalize_team_name(data["team_away"])
-    day_start = datetime.combine(day - timedelta(days=1), datetime.min.time())
-    day_end = datetime.combine(day + timedelta(days=1), datetime.max.time())
-
-    match = await session.scalar(
-        select(Match).where(
-            Match.match_key.like(f"{home_norm}:{away_norm}:%"),
-            Match.match_date >= day_start,
-            Match.match_date <= day_end,
-        )
-    )
+    match = await _find_by_normalized_teams(session, home_norm, away_norm, day)
     if match:
         _refresh_match_fields(match, data)
         await _link_teams(session, match, data)
