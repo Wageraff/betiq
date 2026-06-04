@@ -53,6 +53,14 @@ class TeamCanonicalTests(unittest.TestCase):
             canonical_team_key("Арнальди М."),
         )
 
+    def test_women_volleyball_brazil_dominican(self) -> None:
+        day = date(2026, 6, 5)
+        k_ru = build_match_key("Бразилия (жен.)", "Доминикана (жен.)", day)
+        k_ro = build_match_key("Braziliei (F)", "Republicii Dominicane (F)", day)
+        self.assertEqual(k_ru, k_ro)
+        self.assertEqual(canonical_team_key("Бразилия (жен.)"), "brazilwomen")
+        self.assertEqual(canonical_team_key("Republicii Dominicane (F)"), "dominicanwomen")
+
 
 if __name__ == "__main__":
     unittest.main()

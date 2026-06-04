@@ -9,9 +9,11 @@ from src.scraper.utils.team_aliases import TEAM_ALIASES
 CLUB_PREFIXES = re.compile(r"\b(fc|fk|sc|ac|sk|bk|if|afc|cf|rc)\b", re.I)
 
 _WOMEN_MARKER = re.compile(
-    r"\(f\)|\(w\)|\(жен\.?\)|\(female\)|\(femei\)|\bwomen\b|\(f\.\)",
+    r"\(f\)|\(w\)|\(жен\.?\)|\(ж\.?\)|\(female\)|\(femei\)|\bwomen\b|\(f\.\)",
     re.I,
 )
+
+_WOMEN_KEY_SUFFIX = "women"
 
 _CYRILLIC_MAP = {
     "а": "a",
@@ -249,6 +251,30 @@ def _person_canonical(mechanical: str, raw: str) -> str:
     return mechanical
 
 
+def _strip_women_suffix(key: str) -> str:
+    if key.endswith(_WOMEN_KEY_SUFFIX):
+        return key[: -len(_WOMEN_KEY_SUFFIX)]
+    return key
+
+
+def _resolve_country_base(mechanical: str, cleaned: str) -> str:
+    """Ключ сборной/клуба без суффикса women."""
+    if mechanical in TEAM_ALIASES:
+        return _strip_women_suffix(resolve_team_key(mechanical))
+
+    key = resolve_team_key(_person_canonical(mechanical, cleaned))
+    if key in _COUNTRY_KEYS:
+        return _strip_women_suffix(key)
+    return _strip_women_suffix(key)
+
+
+def _apply_women_suffix(base: str) -> str:
+    base = _strip_women_suffix(base)
+    if not base:
+        return ""
+    return f"{base}{_WOMEN_KEY_SUFFIX}"
+
+
 def canonical_team_key(name: str) -> str:
     """
     Хук: любое написание с сайта → один канонический ключ (англ./латиница).
@@ -267,16 +293,16 @@ def canonical_team_key(name: str) -> str:
     if not mechanical:
         return ""
 
-    key = resolve_team_key(mechanical)
-    if key not in _COUNTRY_KEYS:
-        key = resolve_team_key(_person_canonical(mechanical, cleaned))
-
-    if women and not key.endswith("women"):
-        base = key[: -5] if key.endswith("women") else key
+    if women:
+        base = _resolve_country_base(mechanical, cleaned)
         if base in _COUNTRY_KEYS or len(base) >= 4:
-            key = f"{base}women"
+            return _apply_women_suffix(base)
+        return _apply_women_suffix(resolve_team_key(mechanical))
 
-    return key
+    key = resolve_team_key(mechanical)
+    if key in _COUNTRY_KEYS:
+        return key
+    return resolve_team_key(_person_canonical(mechanical, cleaned))
 
 
 def normalize_team_name(name: str) -> str:
