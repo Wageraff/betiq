@@ -526,9 +526,10 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
     content_html = raw.get("content_html") or ""
     if article_body:
         full_text = article_body
-        content_html = content_html or ""
+        text_source = "NewsArticle.articleBody"
     else:
         full_text = html_to_plain_text(clean_article_html(content_html))
+        text_source = "workarea-text"
 
     sport = _resolve_sport(raw, url)
     if not sport:
@@ -574,6 +575,7 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         "content_html": clean_article_html(content_html) if content_html else "",
         "event_meta": raw.get("event") or {},
         "article_meta": raw.get("article") or {},
+        "text_source": text_source,
     }
 
 
@@ -605,6 +607,16 @@ async def run_test_parse(urls: Optional[list[tuple[str, str]]] = None) -> None:
                     print(f"  competition:{data.get('competition')}")
                     print(f"  match_date: {data['match_date']}")
                     print(f"  author:     {data.get('author')}")
+                    ft = (data.get("full_text") or "").strip()
+                    preview = ft[:220].replace("\n", " ") if ft else ""
+                    if len(ft) > 220:
+                        preview += "…"
+                    print(
+                        f"  full_text:  {len(ft)} chars "
+                        f"({data.get('text_source', '?')})"
+                    )
+                    if preview:
+                        print(f"  preview:    {preview}")
                     print(f"  bets:       {len(data.get('bets') or [])}")
                     for b in data.get("bets") or []:
                         print(f"    - {b.get('bet_pick')} @ {b.get('odds')}")
