@@ -60,7 +60,7 @@ async def merge_team_into(
 
 
 async def finalize_keeper(session: AsyncSession, keeper: Team, canon_key: str) -> Team:
-    canonical_name = canonical_team_display(canon_key)
+    canonical_name = canonical_team_display(canon_key, sport=keeper.sport)
     keeper.normalized_key = canon_key
     if keeper.display_name != canonical_name:
         if keeper.display_name and keeper.display_name != canonical_name:
@@ -113,7 +113,9 @@ async def dedupe_teams(session: AsyncSession, *, dry_run: bool = False) -> int:
             continue
         group.sort(key=lambda t: (t.normalized_key != canon_key, t.id))
         keeper = group[0]
-        canonical_name = canonical_team_display(canon_key)
+        sports = {t.sport for t in group if t.sport}
+        group_sport = sports.pop() if len(sports) == 1 else None
+        canonical_name = canonical_team_display(canon_key, sport=group_sport)
 
         for dup in group[1:]:
             print(

@@ -111,7 +111,6 @@ _CANONICAL_DISPLAY: dict[str, str] = {
     "brazil": "Brazil",
     "argentina": "Argentina",
     "honduras": "Honduras",
-    "england": "England",
     "newzealand": "New Zealand",
     "algeria": "Algeria",
     "poland": "Poland",
@@ -127,6 +126,46 @@ def resolve_team_key(key: str) -> str:
     if not k:
         return ""
     return _TEAM_ALIASES.get(k, k)
+
+
+_COUNTRY_KEYS: set[str] = set(_CANONICAL_DISPLAY) | set(_TEAM_ALIASES.values())
+
+
+def is_likely_person_key(key: str) -> bool:
+    """Склеенный ключ без пробелов — вероятно теннисист/игрок, не сборная."""
+    k = resolve_team_key(key)
+    if not k or k in _COUNTRY_KEYS or len(k) < 10:
+        return False
+    return True
+
+
+def format_person_display(name: str) -> str:
+    """Felix Auger-Aliassime → Felix Auger Aliassime."""
+    name = re.sub(r"\s+", " ", name.replace("-", " ").replace("—", " ").strip())
+    if not name:
+        return ""
+    return " ".join(part.capitalize() for part in name.split())
+
+
+def pick_best_display_raw(candidates: list[str], normalized_key: str) -> str:
+    """Лучшее написание из матчей/парсера для display_name."""
+    key = resolve_team_key(normalized_key)
+    valid: list[str] = []
+    for name in candidates:
+        n = (name or "").strip()
+        if n and resolve_team_key(normalize_team_name(n)) == key:
+            valid.append(n)
+    if not valid:
+        return ""
+    valid.sort(
+        key=lambda n: (
+            " " in n,
+            "-" in n,
+            len(n),
+        ),
+        reverse=True,
+    )
+    return valid[0]
 
 
 def legacy_keys_for(canonical_key: str) -> list[str]:
@@ -149,16 +188,25 @@ def _transliterate_cyrillic(text: str) -> str:
     return "".join(out)
 
 
-def canonical_team_display(normalized_key: str, *, raw_name: str | None = None) -> str:
-    """Английское имя для справочника teams.display_name."""
+def canonical_team_display(
+    normalized_key: str,
+    *,
+    raw_name: str | None = None,
+    sport: str | None = None,
+) -> str:
+    """Имя для справочника: сборные — EN; игроки — с пробелами."""
     key = resolve_team_key(normalized_key)
     if not key:
         return ""
     raw = (raw_name or "").strip()
-    if raw and " " in raw and normalize_team_name(raw) == key:
+    if raw and normalize_team_name(raw) == key:
+        if sport == "tennis" or is_likely_person_key(key) or " " in raw or "-" in raw:
+            return format_person_display(raw)
         return raw
     if key in _CANONICAL_DISPLAY:
         return _CANONICAL_DISPLAY[key]
+    if sport == "tennis" or is_likely_person_key(key):
+        return format_person_display(raw) if raw else key.title()
     return key.title()
 
 
@@ -182,14 +230,22 @@ def merge_alias_text(existing: str | None, *names: str) -> str | None:
     return ", ".join(parts) if parts else None
 
 
-def is_catalog_display_name(display_name: str, normalized_key: str) -> bool:
-    """Имя из справочника (EN) или ещё «сырое» с парсера — можно обновить на canonical."""
+def is_catalog_display_name(
+    display_name: str,
+    normalized_key: str,
+    *,
+    sport: str | None = None,
+) -> bool:
+    """Можно заменить display_name на каноническое (с парсера или матчей)."""
     display = (display_name or "").strip()
     key = resolve_team_key(normalized_key)
     if not display or not key:
         return False
-    if display == canonical_team_display(key):
+    if (sport == "tennis" or is_likely_person_key(key)) and " " not in display:
         return True
+    target = canonical_team_display(key, raw_name=display, sport=sport)
+    if display == target:
+        return False
     return resolve_team_key(normalize_team_name(display)) == key
 
 

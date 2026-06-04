@@ -76,15 +76,14 @@ _TEST_URLS = [
 ]
 
 _SKIP_SLUG = re.compile(
-    r"ponturile-etapei|ponturile-zilei|avancronica|preview|sferturi|biletul|cota-2|"
+    r"ponturile-etapei|ponturile-zilei|pontul-zilei-\d|tenis-atp-|ponturi-pariuri-sferturi|"
+    r"avancronica|preview|sferturi|biletul|cota-2|"
     r"etapei-\d+|pronosticul-zilei|maine-|pozele-zilei",
     re.I,
 )
-_MATCH_SLUG = re.compile(
-    r"-vs-|_vs_|\bvs\b|"
-    r"dinamo|veszprem|bucuresti|georgia|romania|andreeva",
-    re.I,
-)
+# Один матч: …-vs-…, handbal -si- (Gloria … CSM), sau …-etapa-N (Dinamo–Veszprem)
+_HANDABALL_SLUG = re.compile(r"-si-.*(?:bistrita|dinamo|gloria|csm|veszprem)", re.I)
+_ETAPA_SLUG = re.compile(r"(?:-\d+-etapa-|-etapa-\d+)", re.I)
 _MULTI_MATCH_SLUG = re.compile(r"-si-", re.I)
 _COTA_RE = re.compile(r"cot[aă]\s+([\d.,]+)", re.I)
 _PONT_PICK_RE = re.compile(r"^Pont(?:\s+principal)?\s*:\s*(.+)$", re.I)
@@ -92,8 +91,14 @@ _PONT_PICK_RE = re.compile(r"^Pont(?:\s+principal)?\s*:\s*(.+)$", re.I)
 
 _COLLECT_JS = """
 () => {
-  const skip = /ponturile-etapei|ponturile-zilei|avancronica|preview|sferturi|biletul|cota-2|etapei-\\d+/i;
-  const matchSlug = /-vs-|\\bvs\\b|dinamo|veszprem|georgia|romania|andreeva/i;
+  const skip = /ponturile-etapei|ponturile-zilei|pontul-zilei-\\d|tenis-atp-|ponturi-pariuri-sferturi|avancronica|preview|sferturi|biletul|cota-2|etapei-\\d+/i;
+  const isMatchSlug = (slug) => {
+    if (!slug || slug.length < 12) return false;
+    if (/-vs-/.test(slug) || /\\bvs\\b/.test(slug)) return true;
+    if (/-si-/.test(slug) && /bistrita|dinamo|gloria|csm|veszprem/i.test(slug)) return true;
+    if (/-etapa-\\d+/.test(slug) || /-\\d+-etapa-/.test(slug)) return true;
+    return false;
+  };
   const out = new Set();
   for (const a of document.querySelectorAll('a[href]')) {
     let href = a.href.split('#')[0].split('?')[0].replace(/\\/$/, '');
@@ -104,8 +109,7 @@ _COLLECT_JS = """
     let path;
     try { path = new URL(href).pathname; } catch (e) { continue; }
     const slug = path.split('/').filter(Boolean).pop() || '';
-    if (slug.length < 12 || !matchSlug.test(slug)) continue;
-    if (/-si-/.test(slug) && !/-vs-/.test(slug)) continue;
+    if (!isMatchSlug(slug)) continue;
     out.add(href);
   }
   return [...out];
@@ -233,20 +237,40 @@ _PARSE_JS = """
 """
 
 
-def _is_valid_collect_url(url: str) -> bool:
+def _is_single_match_slug(slug: str) -> bool:
+    if not slug or len(slug) < 12:
+        return False
+    if "-vs-" in slug or re.search(r"\bvs\b", slug, re.I):
+        return True
+    if _HANDABALL_SLUG.search(slug):
+        return True
+    if _ETAPA_SLUG.search(slug):
+        return True
+    return False
+
+
+def _is_excluded_article_url(url: str) -> bool:
+    """Сводки дня / турнира, не страница одного матча."""
     path = urlparse(url).path.lower()
     if "/ponturipariuri/" in path:
-        return False
-    if "/ponturi-pariuri/" not in path and "/articole-pariuri-sportive/" not in path:
-        return False
+        return True
     if _SKIP_SLUG.search(path):
-        return False
+        return True
     slug = path.rstrip("/").split("/")[-1]
-    if len(slug) < 12:
+    if not _is_single_match_slug(slug):
+        return True
+    return False
+
+
+def _is_valid_collect_url(url: str) -> bool:
+    if _is_excluded_article_url(url):
+        return False
+    path = urlparse(url).path.lower()
+    if "/ponturi-pariuri/" not in path and "/articole-pariuri-sportive/" not in path:
         return False
     if _is_multi_match_roundup("", url):
         return False
-    return bool(_MATCH_SLUG.search(slug))
+    return True
 
 
 def _match_pairs_from_lines(lines: list[str]) -> set[tuple[str, str]]:
@@ -731,6 +755,10 @@ async def get_article_urls(page: Any) -> list[str]:
 async def parse_prediction(page: Any, url: str) -> Optional[dict]:
     from src.scraper.utils.browser import wait_cloudflare
 
+    if _is_excluded_article_url(url):
+        log.info("Skip %s: excluded URL (roundup / not a single match)", url)
+        return None
+
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
     await wait_cloudflare(page)
 
@@ -774,6 +802,9 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         return None
 
     bets = _parse_bets(raw.get("bets"), full_text)
+    if not bets:
+        log.info("Skip %s: no bets extracted (not a match tip page)", url)
+        return None
     if _is_multi_match_roundup(title, url, bets):
         log.info("Skip %s: multi-match roundup (%d fixture pairs in bets)", url, len(_match_pairs_from_lines([b.get("bet_pick") or "" for b in bets])))
         return None
