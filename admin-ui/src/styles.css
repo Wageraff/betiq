@@ -269,6 +269,11 @@ th {
   cursor: pointer;
 }
 
+.dup-manual {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;

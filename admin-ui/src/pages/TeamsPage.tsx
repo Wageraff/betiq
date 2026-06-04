@@ -9,7 +9,10 @@ import {
 export default function TeamsPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [dupGroups, setDupGroups] = useState<TeamDuplicateGroup[]>([]);
+  const [dupError, setDupError] = useState("");
   const [keepers, setKeepers] = useState<Record<string, number>>({});
+  const [mergeIds, setMergeIds] = useState<number[]>([]);
+  const [manualKeeperId, setManualKeeperId] = useState<number | null>(null);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Team | null>(null);
   const [displayName, setDisplayName] = useState("");
@@ -19,16 +22,10 @@ export default function TeamsPage() {
   const [msg, setMsg] = useState("");
   const [merging, setMerging] = useState(false);
 
-  const load = async () => {
-    setError("");
-    const params = new URLSearchParams({ limit: "100" });
-    if (q) params.set("q", q);
+  const loadDuplicates = async () => {
+    setDupError("");
     try {
-      const [teamList, dups] = await Promise.all([
-        api.get<Team[]>(`/teams?${params}`),
-        api.get<TeamDuplicatesOut>("/teams/duplicates"),
-      ]);
-      setTeams(teamList);
+      const dups = await api.get<TeamDuplicatesOut>("/teams/duplicates");
       setDupGroups(dups.groups);
       const next: Record<string, number> = {};
       for (const g of dups.groups) {
@@ -38,8 +35,26 @@ export default function TeamsPage() {
       }
       setKeepers(next);
     } catch (e) {
+      setDupGroups([]);
+      setDupError(
+        String(e).includes("404")
+          ? "Эндпоинт /teams/duplicates не найден — сделайте git pull и restart betiq-api"
+          : String(e)
+      );
+    }
+  };
+
+  const load = async () => {
+    setError("");
+    const params = new URLSearchParams({ limit: "200" });
+    if (q) params.set("q", q);
+    try {
+      const teamList = await api.get<Team[]>(`/teams?${params}`);
+      setTeams(teamList);
+    } catch (e) {
       setError(String(e));
     }
+    await loadDuplicates();
   };
 
   useEffect(() => {
@@ -52,6 +67,19 @@ export default function TeamsPage() {
     setSport(t.sport || "");
     setAliases(t.aliases || "");
     setMsg("");
+  };
+
+  const toggleMergeId = (id: number) => {
+    setMergeIds((prev) => {
+      const next = prev.includes(id)
+        ? prev.filter((x) => x !== id)
+        : [...prev, id];
+      if (next.length > 0 && (!manualKeeperId || !next.includes(manualKeeperId))) {
+        setManualKeeperId(next[0]);
+      }
+      if (next.length === 0) setManualKeeperId(null);
+      return next;
+    });
   };
 
   const save = async () => {
@@ -96,9 +124,29 @@ export default function TeamsPage() {
         duplicate_ids: duplicateIds,
       });
       setMsg(res.message);
-      if (selected && duplicateIds.includes(selected.id)) {
-        setSelected(null);
-      }
+      if (selected && duplicateIds.includes(selected.id)) setSelected(null);
+      setMergeIds([]);
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const mergeManual = async () => {
+    if (!manualKeeperId || mergeIds.length < 2) return;
+    const duplicateIds = mergeIds.filter((id) => id !== manualKeeperId);
+    setMerging(true);
+    setError("");
+    try {
+      const res = await api.post<{ message: string }>("/teams/merge", {
+        keeper_id: manualKeeperId,
+        duplicate_ids: duplicateIds,
+      });
+      setMsg(res.message);
+      setMergeIds([]);
+      setManualKeeperId(null);
       load();
     } catch (e) {
       setError(String(e));
@@ -113,6 +161,7 @@ export default function TeamsPage() {
     try {
       const res = await api.post<{ message: string }>("/teams/merge-auto", {});
       setMsg(res.message);
+      setMergeIds([]);
       load();
     } catch (e) {
       setError(String(e));
@@ -121,6 +170,8 @@ export default function TeamsPage() {
     }
   };
 
+  const mergeTeamsForManual = teams.filter((t) => mergeIds.includes(t.id));
+
   return (
     <>
       <h2>Справочник команд / соперников</h2>
@@ -128,57 +179,95 @@ export default function TeamsPage() {
         Справочник на английском (ключи как в match_key). Варианты с сайтов — в алиасах.
       </p>
 
-      {dupGroups.length > 0 && (
-        <section className="panel dup-groups">
-          <div className="dup-groups-head">
-            <h3>Дубликаты ({dupGroups.length})</h3>
-            <button
-              className="secondary"
-              disabled={merging}
-              onClick={mergeAllAuto}
-            >
-              Объединить все автоматически
+      <section className="panel dup-groups">
+        <div className="dup-groups-head">
+          <h3>Объединение дубликатов</h3>
+          <button
+            className="secondary"
+            disabled={merging}
+            onClick={mergeAllAuto}
+          >
+            Сканировать и объединить все
+          </button>
+        </div>
+
+        {dupError && <p className="error">{dupError}</p>}
+
+        {!dupError && dupGroups.length === 0 && (
+          <p style={{ color: "var(--muted)", marginBottom: "1rem" }}>
+            Автоматически похожих пар не найдено (один ключ на команду). Если в таблице
+            всё ещё видите «Franta» и «France» — отметьте их вручную ниже или нажмите
+            «Сканировать и объединить все».
+          </p>
+        )}
+
+        {dupGroups.map((g) => (
+          <div key={g.canonical_key} className="dup-group">
+            <div className="dup-group-title">
+              <strong>{g.canonical_display}</strong>
+              <code>{g.canonical_key}</code>
+            </div>
+            <ul>
+              {g.teams.map((t) => (
+                <li key={t.id}>
+                  <label>
+                    <input
+                      type="radio"
+                      name={`keeper-${g.canonical_key}`}
+                      checked={keepers[g.canonical_key] === t.id}
+                      onChange={() =>
+                        setKeepers((k) => ({
+                          ...k,
+                          [g.canonical_key]: t.id,
+                        }))
+                      }
+                    />
+                    #{t.id} {t.display_name}{" "}
+                    <span style={{ color: "var(--muted)" }}>
+                      ({t.normalized_key})
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <button disabled={merging} onClick={() => mergeGroup(g)}>
+              Объединить группу
             </button>
           </div>
-          {dupGroups.map((g) => (
-            <div key={g.canonical_key} className="dup-group">
-              <div className="dup-group-title">
-                <strong>{g.canonical_display}</strong>
-                <code>{g.canonical_key}</code>
-              </div>
-              <ul>
-                {g.teams.map((t) => (
-                  <li key={t.id}>
+        ))}
+
+        <div className="dup-manual" style={{ marginTop: "1rem" }}>
+          <h4 style={{ margin: "0 0 0.5rem" }}>Ручное объединение</h4>
+          <p style={{ color: "var(--muted)", fontSize: "0.9rem", margin: "0 0 0.75rem" }}>
+            В таблице ниже включите колонку «Слить» у 2+ команд одной сущности.
+          </p>
+          {mergeIds.length >= 2 ? (
+            <>
+              <p>Выбрано: {mergeIds.length}</p>
+              <ul style={{ listStyle: "none", padding: 0 }}>
+                {mergeTeamsForManual.map((t) => (
+                  <li key={t.id} style={{ marginBottom: 4 }}>
                     <label>
                       <input
                         type="radio"
-                        name={`keeper-${g.canonical_key}`}
-                        checked={keepers[g.canonical_key] === t.id}
-                        onChange={() =>
-                          setKeepers((k) => ({
-                            ...k,
-                            [g.canonical_key]: t.id,
-                          }))
-                        }
+                        name="manual-keeper"
+                        checked={manualKeeperId === t.id}
+                        onChange={() => setManualKeeperId(t.id)}
                       />
-                      #{t.id} {t.display_name}{" "}
-                      <span style={{ color: "var(--muted)" }}>
-                        ({t.normalized_key})
-                      </span>
+                      Оставить #{t.id} {t.display_name} ({t.normalized_key})
                     </label>
                   </li>
                 ))}
               </ul>
-              <button
-                disabled={merging}
-                onClick={() => mergeGroup(g)}
-              >
-                Объединить в выбранную
+              <button disabled={merging || !manualKeeperId} onClick={mergeManual}>
+                Объединить выбранные
               </button>
-            </div>
-          ))}
-        </section>
-      )}
+            </>
+          ) : (
+            <p style={{ color: "var(--muted)" }}>Отметьте минимум две команды в таблице.</p>
+          )}
+        </div>
+      </section>
 
       <div className="filters panel">
         <input
@@ -196,6 +285,7 @@ export default function TeamsPage() {
           <table>
             <thead>
               <tr>
+                <th title="Для ручного слияния">Слить</th>
                 <th></th>
                 <th>Название (EN)</th>
                 <th>Ключ (normalized)</th>
@@ -212,6 +302,13 @@ export default function TeamsPage() {
                       selected?.id === t.id ? "#1e3a5f" : undefined,
                   }}
                 >
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={mergeIds.includes(t.id)}
+                      onChange={() => toggleMergeId(t.id)}
+                    />
+                  </td>
                   <td>
                     {t.logo_url ? (
                       <img src={t.logo_url} alt="" className="team-logo" />
