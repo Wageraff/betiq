@@ -10,6 +10,7 @@ SOURCE_MODULES = {
     "legalbet": "src.scraper.sources.legalbet",
     "legalbet_ru": "src.scraper.sources.legalbet_ru",
     "metaratings_ru": "src.scraper.sources.metaratings_ru",
+    "vseprosport_ru": "src.scraper.sources.vseprosport_ru",
 }
 
 

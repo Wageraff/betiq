@@ -33,6 +33,8 @@ RU_MONTHS = {
     "июнь": 6,
     "июн": 6,
     "iyunya": 6,
+    "iyunja": 6,
+    "iyunia": 6,
     "iyune": 6,
     "iyun": 6,
     "июля": 7,

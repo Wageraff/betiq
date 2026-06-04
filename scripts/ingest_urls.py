@@ -50,6 +50,8 @@ _HOST_MODULE = {
     "legalbet.ru": "legalbet_ru",
     "metaratings.ru": "metaratings_ru",
     "www.metaratings.ru": "metaratings_ru",
+    "vseprosport.ru": "vseprosport_ru",
+    "www.vseprosport.ru": "vseprosport_ru",
     "beturi.ro": "beturi",
     "www.pontul-zilei.com": "pontulzilei",
     "pontul-zilei.com": "pontulzilei",
