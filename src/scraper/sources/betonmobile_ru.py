@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from src.scraper.utils.html_clean import clean_article_html, html_to_plain_text
 from src.scraper.utils.match_datetime import parse_schema_start_date
 from src.scraper.utils.normalizer import (
+    SPORT_ALIASES,
     default_kickoff_storage,
     normalize_sport,
     parse_date_from_url,
@@ -268,6 +269,47 @@ _PATH_SPORT = [
     (re.compile(r"prognozy-na-futbol|futbol|football", re.I), "football"),
 ]
 
+_CANONICAL_SPORTS = frozenset(SPORT_ALIASES.values())
+
+
+def _canonical_sport(raw: Optional[str]) -> str:
+    if not raw:
+        return ""
+    sport = normalize_sport(raw)
+    if sport in _CANONICAL_SPORTS:
+        return sport
+    key = raw.strip().lower()
+    for alias, canon in SPORT_ALIASES.items():
+        if alias in key:
+            return canon
+    return ""
+
+
+def _sport_from_competition(comp: str) -> str:
+    if not comp:
+        return ""
+    c = comp.lower()
+    if re.search(r"\bнхл\b|\bnhl\b|кубок\s+стэнли|khl\b", c):
+        return "hockey"
+    if re.search(r"rolan|garros|atp|wta|теннис", c):
+        return "tennis"
+    if re.search(r"втб|euroleague|nba|баскет", c):
+        return "basketball"
+    if re.search(r"товарищ|сборн|рпл|премьер|чемпионат\s+мира|футбол", c):
+        return "football"
+    return ""
+
+
+def _sport_from_slug(url: str) -> str:
+    slug = urlparse(url).path.strip("/").lower()
+    if re.search(r"harrikeyn|hurricane|golden-nayts|vegas|nhl|hokkej", slug):
+        return "hockey"
+    if re.search(r"garros|shnaider|tennis|atp", slug):
+        return "tennis"
+    if re.search(r"basket|uniks|cska|vtb", slug):
+        return "basketball"
+    return ""
+
 
 def _sport_from_url(url: str) -> str:
     for pat, sport in _PATH_SPORT:
@@ -446,20 +488,21 @@ def _resolve_sport(raw: dict, url: str) -> str:
         ]
     )
     for candidate in (
-        _sport_from_url(url),
         _URL_SPORT_HINT.get(url.rstrip("/")),
-        normalize_sport(competition),
+        _sport_from_url(url),
+        _sport_from_slug(url),
+        _sport_from_competition(competition),
+        _canonical_sport(competition),
     ):
-        if candidate:
+        if candidate in _CANONICAL_SPORTS:
             return candidate
-    slug = urlparse(url).path.lower()
-    if re.search(r"hokkej|nhl|хоккей", slug + body, re.I):
+    if re.search(r"нхл|nhl|хоккей|кубок\s+стэнли", body, re.I):
         return "hockey"
-    if re.search(r"tennis|теннис|atp|wta|garros", slug + body, re.I):
+    if re.search(r"rolan|garros|теннис|atp|wta", body, re.I):
         return "tennis"
-    if re.search(r"basket|баскет|vtb", slug + body, re.I):
+    if re.search(r"баскет|втб|nba|euroleague", body, re.I):
         return "basketball"
-    if re.search(r"futbol|футбол|сборн", slug + body, re.I):
+    if re.search(r"футбол|сборн|товарищ", body, re.I):
         return "football"
     return ""
 
@@ -585,6 +628,8 @@ async def run_test_parse(urls: Optional[list[tuple[str, str]]] = None) -> None:
     pairs = urls or _TEST_URLS
     verify = SOURCE_CONFIG["base_url"].rstrip("/") + SOURCE_CONFIG["category_url"]
     geo = SOURCE_CONFIG.get("geo")
+    global _URL_SPORT_HINT
+    _URL_SPORT_HINT = {u.rstrip("/"): s for s, u in pairs if s}
     async with browser_lifecycle():
         async with scrape_geo_context(geo):
             async with page_session(verify_url=verify) as (page, _proxy):
