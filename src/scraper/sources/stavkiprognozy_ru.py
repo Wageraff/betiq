@@ -334,13 +334,23 @@ _PARSE_JS = """
 
   const domText = [...new Set(textParts)].join('\\n\\n').trim();
 
+  const isNoisePick = (pick) => {
+    pick = (pick || '').trim().replace(/\\s+/g, ' ');
+    if (!pick || pick.length < 4 || pick.length > 100) return true;
+    if (/^[\d.,]+\\s/.test(pick) || /^\\d+\\)\\s/.test(pick)) return true;
+    if (/прогноз\\s+и\\s+ставк|наш\\s+выбор|кф\\.|коэффициент|букмекер/i.test(pick)) return true;
+    if ((pick.match(/\\./g) || []).length > 2) return true;
+    return false;
+  };
+
   const betsDom = [];
   const seenBet = new Set();
   const pushBet = (pick, odds) => {
     pick = (pick || '').trim().replace(/\\s+/g, ' ');
+    pick = pick.replace(/^[\d.,]+\\s+/, '').replace(/\\s+@\\s*[\\d.,]+\\s*$/, '').trim();
     odds = (odds || '').trim();
     const om = odds.match(/(\\d{1,2}[.,]\\d{2})/);
-    if (!pick || !om) return;
+    if (!pick || !om || isNoisePick(pick)) return;
     odds = om[1];
     const key = pick + '|' + odds;
     if (seenBet.has(key)) return;
@@ -407,10 +417,6 @@ _PATH_SPORT = [
     (re.compile(r"/prognozy/football/", re.I), "football"),
 ]
 
-_INLINE_BET = re.compile(
-    r"(\{([^}]+)\}|([^.{}\n]{5,90}?))\s+за\s+(\d{1,2}[.,]\d{2})\b",
-    re.I,
-)
 _SPAN_BET = re.compile(r"\{([^}]+)\}\s*за\s*\{([\d.,]+)\}", re.I)
 _LINE_BET = re.compile(
     r"^[-•]?\s*(.+?)\s+за\s+(\d{1,2}[.,]\d{2})\s*$",
@@ -485,11 +491,35 @@ def _build_match_date(raw: dict, url: str) -> Optional[datetime]:
     return default_kickoff_storage(d, geo=geo) if d else None
 
 
+_NOISE_BET = re.compile(
+    r"прогноз\s+и\s+ставк|наш\s+выбор|хозяева\s+играют|в\s+этой\s+игре|"
+    r"матч\s+между|состоится\s+\d|кф\.|коэффициент|букмекер",
+    re.I,
+)
+_BET_WORD = re.compile(
+    r"тотал|фора|победа|обе|забьют|ничья|индивидуальный|\bит\b|"
+    r"меньше|больше|голов|гейм|сет|тайм|четверт|половин",
+    re.I,
+)
+
+
+def _is_noise_bet_pick(pick: str) -> bool:
+    if not pick or len(pick) < 4 or len(pick) > 100:
+        return True
+    if re.match(r"^[\d.,]+\s", pick) or re.match(r"^\d+\)\s", pick):
+        return True
+    if pick.count(".") > 2:
+        return True
+    return bool(_NOISE_BET.search(pick))
+
+
 def _clean_bet_pick(pick: str) -> str:
     pick = (pick or "").strip().strip("{}")
+    pick = re.sub(r"^[\d.,]+\s+", "", pick)
+    pick = re.sub(r"\s+@\s*[\d.,]+\s*$", "", pick)
     pick = re.sub(r"\s+", " ", pick)
     pick = pick.strip(" ,-«»\"'")
-    if len(pick) < 4:
+    if _is_noise_bet_pick(pick):
         return ""
     if re.search(r"^(?:коэффициент|ставка|букмекер)\b", pick, re.I):
         return ""
@@ -500,8 +530,11 @@ def _bet_pick_key(pick: str, odds: str) -> str:
     p = pick.lower()
     p = re.sub(r"мячей", "голов", p)
     p = re.sub(r"[«»\"'–—]", "", p)
-    p = re.sub(r"\s*фор[аы]\s*1\b", " фора1 ", p)
-    p = re.sub(r"\s*фор[аы]\s*2\b", " фора2 ", p)
+    p = re.sub(r"\s*фор[аы]\s*(?:1|2|\S+)", " фора ", p)
+    hm = re.search(r"\(([+-]?\d+[.,]?\d*)\)", p)
+    if "фор" in p and hm:
+        h = hm.group(1).replace(",", ".")
+        return f"handicap|{h}|{odds}"
     p = re.sub(r"\s+", " ", p).strip()
     return f"{p}|{odds}"
 
@@ -524,6 +557,7 @@ def _dedupe_bets(bets: list[dict]) -> list[dict]:
 
 
 def _bets_from_full_text(full_text: str) -> list[tuple[str, str]]:
+    """Только короткие inline «{pick} за {odds}» по строкам — без разбора абзацев."""
     if not full_text:
         return []
     found: list[tuple[str, str]] = []
@@ -531,7 +565,7 @@ def _bets_from_full_text(full_text: str) -> list[tuple[str, str]]:
 
     def add(pick: str, odds: str) -> None:
         pick = _clean_bet_pick(pick)
-        if not pick:
+        if not pick or not _BET_WORD.search(pick):
             return
         key = _bet_pick_key(pick, odds)
         if key in seen:
@@ -542,12 +576,13 @@ def _bets_from_full_text(full_text: str) -> list[tuple[str, str]]:
     for m in _SPAN_BET.finditer(full_text):
         add(m.group(1), m.group(2))
 
-    for m in _INLINE_BET.finditer(full_text):
-        pick = m.group(2) or m.group(3) or ""
-        add(pick, m.group(4))
-
-    for m in _LINE_BET.finditer(full_text):
-        add(m.group(1), m.group(2))
+    for line in full_text.splitlines():
+        line = line.strip()
+        if not line or len(line) > 110:
+            continue
+        m = _LINE_BET.match(line)
+        if m:
+            add(m.group(1), m.group(2))
 
     return found
 
@@ -577,8 +612,9 @@ def _parse_bets(bets_dom: list[dict], full_text: str) -> list[dict]:
     for item in bets_dom or []:
         add(item.get("pick") or "", item.get("odds") or "")
 
-    for pick, odds_raw in _bets_from_full_text(full_text):
-        add(pick, odds_raw)
+    if len(out) < 4:
+        for pick, odds_raw in _bets_from_full_text(full_text):
+            add(pick, odds_raw)
 
     return _dedupe_bets(out)
 
