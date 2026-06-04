@@ -22,7 +22,7 @@ from src.scraper.utils.normalizer import (
     parse_match_datetime,
     parse_odds,
 )
-from src.scraper.utils.teams import parse_teams_from_title
+from src.scraper.utils.teams import parse_teams_from_title, sanitize_team_label
 
 log = logging.getLogger("metaratings_ru")
 
@@ -278,19 +278,28 @@ def _teams_from_slug(url: str) -> tuple[str, str]:
 
 
 def _resolve_teams(raw: dict, url: str) -> tuple[str, str]:
-    home = (raw.get("team_home") or "").strip()
-    away = (raw.get("team_away") or "").strip()
-    if home and away:
-        return home, away
+    candidates: list[tuple[str, str]] = []
 
-    h1 = raw.get("h1") or ""
+    rh = (raw.get("team_home") or "").strip()
+    ra = (raw.get("team_away") or "").strip()
+    if rh or ra:
+        candidates.append((rh, ra))
+
     meta_title = (raw.get("meta") or {}).get("title") or ""
-    for title in (h1, meta_title):
-        th, ta = parse_teams_from_title(title)
-        if th and ta:
-            return th, ta
+    for title in (raw.get("h1") or "", meta_title):
+        if title:
+            th, ta = parse_teams_from_title(title)
+            if th or ta:
+                candidates.append((th, ta))
 
-    return _teams_from_slug(url)
+    candidates.append(_teams_from_slug(url))
+
+    for home, away in candidates:
+        home = sanitize_team_label(home)
+        away = sanitize_team_label(away)
+        if _is_valid_teams(home, away):
+            return home, away
+    return "", ""
 
 
 def _build_match_date(raw: dict, url: str) -> Optional[datetime]:

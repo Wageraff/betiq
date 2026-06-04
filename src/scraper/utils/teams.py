@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import re
 
-# Хвосты румынских заголовков прогнозов (Legalbet, Beturi и др.)
+# Хвосты заголовков прогнозов (RO: Legalbet/Beturi; RU: Metaratings и др.)
 _TITLE_SUFFIX = re.compile(
-    r"\s*:\s*(?:Ponturi|cele mai bune|pronostic).*$"
-    r"|\s+[—–]\s+(?:Ponturi|cele mai bune|pronostic).*$"
-    r"|\s+ponturi\s+pariuri.*$|\s+pronostic.*$|\s+pariuri\s+.*$",
+    r"\s*:\s*(?:Ponturi|cele mai bune|pronostic|прогноз|ставк).*$"
+    r"|\s+[—–]\s+(?:Ponturi|cele mai bune|pronostic|прогноз).*$"
+    r"|\s+ponturi\s+pariuri.*$|\s+pronostic.*$|\s+pariuri\s+.*$"
+    r"|\s+прогноз\s+на\s+.*$"
+    r"|\s*\.\s+Ставка\s+.*$"
+    r"|\s+ставка\s+с\s+коэффициентом\s+.*$",
     re.I,
 )
 
@@ -61,6 +64,19 @@ def parse_teams_from_preview(text: str) -> tuple[str, str]:
 
 def _trim_away(away: str) -> str:
     away = away.strip()
+    away = re.sub(r"\s*:\s*прогноз.*$", "", away, flags=re.I)
+    away = re.sub(r"\s+прогноз\s+на\s+.*$", "", away, flags=re.I)
+    away = re.sub(r"\s+ставка\s+.*$", "", away, flags=re.I)
+    away = re.sub(r"\s+с\s+коэффициентом\s+.*$", "", away, flags=re.I)
     away = re.sub(r"\s+\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}.*$", "", away)
     away = re.sub(r",\s+.*$", "", away)
     return away.strip()
+
+
+def sanitize_team_label(name: str) -> str:
+    """Убирает хвосты из полей schema/h1 (прогноз, ставка, дата матча)."""
+    s = (name or "").strip()
+    if not s:
+        return ""
+    s = _TITLE_SUFFIX.sub("", s)
+    return _trim_away(s)
