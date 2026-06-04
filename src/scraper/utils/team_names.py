@@ -42,16 +42,53 @@ _CYRILLIC_MAP = {
     "я": "ya",
 }
 
+# RO/RU/варианты без диакритики → канонический ключ (англ.)
 _TEAM_ALIASES: dict[str, str] = {
     "franta": "france",
     "frantsiya": "france",
     "franciya": "france",
     "coastadefildes": "ivorycoast",
+    "coastadefilde": "ivorycoast",
     "coastadefildei": "ivorycoast",
     "kotdivuar": "ivorycoast",
     "kotdivoire": "ivorycoast",
     "cotedivoire": "ivorycoast",
+    "anglia": "england",
+    "olanda": "netherlands",
+    "danemarca": "denmark",
+    "nouazeelanda": "newzealand",
+    "alger": "algeria",
+    "belgia": "belgium",
+    "polonia": "poland",
+    "luxemburg": "luxembourg",
+    "italia": "italy",
+    "tunisia": "tunisia",
+    "honduras": "honduras",
+    "argentina": "argentina",
+    "nigeria": "nigeria",
 }
+
+# Диакритика, которая не всегда в категории Mn (ș, ț и т.д.)
+_LATIN_FOLD = str.maketrans(
+    {
+        "ș": "s",
+        "ş": "s",
+        "ț": "t",
+        "ţ": "t",
+        "ă": "a",
+        "â": "a",
+        "î": "i",
+        "ë": "e",
+        "é": "e",
+        "è": "e",
+        "ê": "e",
+        "á": "a",
+        "ä": "a",
+        "ö": "o",
+        "ü": "u",
+        "ñ": "n",
+    }
+)
 
 # Канонические английские названия для справочника (ключ = normalized_key).
 _CANONICAL_DISPLAY: dict[str, str] = {
@@ -72,7 +109,32 @@ _CANONICAL_DISPLAY: dict[str, str] = {
     "belgium": "Belgium",
     "brazil": "Brazil",
     "argentina": "Argentina",
+    "honduras": "Honduras",
+    "england": "England",
+    "newzealand": "New Zealand",
+    "algeria": "Algeria",
+    "poland": "Poland",
+    "luxembourg": "Luxembourg",
+    "tunisia": "Tunisia",
+    "nigeria": "Nigeria",
 }
+
+
+def resolve_team_key(key: str) -> str:
+    """Канонический normalized_key (с учётом алиасов)."""
+    k = (key or "").strip().lower()
+    if not k:
+        return ""
+    return _TEAM_ALIASES.get(k, k)
+
+
+def legacy_keys_for(canonical_key: str) -> list[str]:
+    """Все ключи в БД, которые относятся к одной команде."""
+    keys = {canonical_key}
+    for old, new in _TEAM_ALIASES.items():
+        if new == canonical_key:
+            keys.add(old)
+    return sorted(keys)
 
 
 def _transliterate_cyrillic(text: str) -> str:
@@ -86,11 +148,14 @@ def _transliterate_cyrillic(text: str) -> str:
     return "".join(out)
 
 
-def canonical_team_display(normalized_key: str) -> str:
+def canonical_team_display(normalized_key: str, *, raw_name: str | None = None) -> str:
     """Английское имя для справочника teams.display_name."""
-    key = (normalized_key or "").strip().lower()
+    key = resolve_team_key(normalized_key)
     if not key:
         return ""
+    raw = (raw_name or "").strip()
+    if raw and " " in raw and normalize_team_name(raw) == key:
+        return raw
     if key in _CANONICAL_DISPLAY:
         return _CANONICAL_DISPLAY[key]
     return key.title()
@@ -119,17 +184,18 @@ def merge_alias_text(existing: str | None, *names: str) -> str | None:
 def is_catalog_display_name(display_name: str, normalized_key: str) -> bool:
     """Имя из справочника (EN) или ещё «сырое» с парсера — можно обновить на canonical."""
     display = (display_name or "").strip()
-    key = (normalized_key or "").strip().lower()
+    key = resolve_team_key(normalized_key)
     if not display or not key:
         return False
     if display == canonical_team_display(key):
         return True
-    return normalize_team_name(display) == key
+    return resolve_team_key(normalize_team_name(display)) == key
 
 
 def normalize_team_name(name: str) -> str:
     name = unicodedata.normalize("NFD", name)
     name = "".join(c for c in name if unicodedata.category(c) != "Mn")
+    name = name.translate(_LATIN_FOLD)
     name = _transliterate_cyrillic(name)
     name = name.lower()
     name = CLUB_PREFIXES.sub("", name)

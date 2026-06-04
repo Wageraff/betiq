@@ -10,6 +10,7 @@ from src.db.models import Team
 from src.scraper.utils.team_names import (
     canonical_team_display,
     is_catalog_display_name,
+    legacy_keys_for,
     merge_alias_text,
     normalize_team_name,
 )
@@ -27,10 +28,18 @@ async def get_or_create_team(
     if not key:
         raise ValueError(f"Cannot normalize team name: {name!r}")
 
-    canonical = canonical_team_display(key)
+    canonical = canonical_team_display(key, raw_name=raw)
+    lookup_keys = legacy_keys_for(key)
 
-    team = await session.scalar(select(Team).where(Team.normalized_key == key))
+    candidates = (
+        await session.scalars(select(Team).where(Team.normalized_key.in_(lookup_keys)))
+    ).all()
+    team = next((t for t in candidates if t.normalized_key == key), None)
+    if not team and candidates:
+        team = min(candidates, key=lambda t: t.id)
     if team:
+        if team.normalized_key != key:
+            team.normalized_key = key
         if sport and not team.sport:
             team.sport = sport
         if raw and raw != canonical:
