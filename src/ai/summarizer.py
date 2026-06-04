@@ -1,6 +1,7 @@
 """
 Генерация AI-рекомендаций через Claude API.
 Запуск: python -m src.ai.summarizer [--match-id 42]
+Шаблон промпта: prompts/ai_match_summary.txt (настройка в config.ini [ai]).
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import asyncio
 import json
 import logging
 import re
+import sys
 from datetime import datetime
 from typing import Any, Optional
 
@@ -17,6 +19,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.ai.prompt_template import build_match_summary_prompt, resolve_prompt_path
 from src.config import settings, setup_logging
 from src.scraper.utils.alerter import alert_ai_failed
 from src.db.models import Match, Prediction
@@ -37,47 +40,6 @@ def needs_ai(match: Match) -> bool:
     if generated is None:
         return True
     return updated > generated
-
-
-def _build_prompt(match: Match, predictions: list[Prediction]) -> str:
-    blocks = []
-    for p in predictions:
-        source_name = p.source.name if p.source else "unknown"
-        bets_str = ", ".join(
-            f"{b.bet_pick} @ {b.odds}"
-            for b in sorted(p.bets, key=lambda x: x.sort_order)
-            if b.bet_pick or b.odds is not None
-        )
-        analysis = (p.full_text or "")[:500]
-        blocks.append(
-            f"Source: {source_name} ({p.language})\n"
-            f"Bets: {bets_str or 'n/a'}\n"
-            f"Analysis: {analysis}\n---"
-        )
-
-    return f"""You are a professional sports betting analyst. Below are predictions from multiple expert tipsters for the same match.
-
-Match: {match.team_home} vs {match.team_away}
-Date: {match.match_date}
-Competition: {match.competition or 'N/A'}
-Sport: {match.sport or 'N/A'}
-
-Expert Predictions:
-{chr(10).join(blocks)}
-
-Task: Write a concise consensus summary in ENGLISH (4–6 sentences):
-1. What do most experts agree on?
-2. The main recommended bet and odds range
-3. Confidence level: High / Medium / Low
-4. Any important risk factors mentioned
-
-Important: Respond ONLY in English. Be concise and analytical, not promotional.
-Return JSON only:
-{{
-  "summary": "...",
-  "top_pick": "Over 2.5 @ ~1.80",
-  "confidence": "Medium"
-}}"""
 
 
 def _parse_json_response(text: str) -> dict[str, Any]:
@@ -141,7 +103,7 @@ async def generate_for_match(
         log.warning("Match %s has fewer than 2 predictions", match_id)
         return False
 
-    prompt = _build_prompt(match, predictions)
+    prompt = build_match_summary_prompt(match, predictions)
     try:
         result = await _call_claude(prompt)
     except Exception as e:
@@ -170,6 +132,18 @@ async def _matches_needing_ai(session: AsyncSession) -> list[int]:
     return list((await session.scalars(stmt)).all())
 
 
+async def print_prompt_for_match(match_id: int) -> None:
+    async with async_session_factory() as session:
+        match = await _load_match(session, match_id)
+        if not match:
+            log.error("Match %s not found", match_id)
+            sys.exit(1)
+        predictions = [p for p in match.predictions if p.match_id == match.id]
+        prompt = build_match_summary_prompt(match, predictions)
+        print(f"# Template: {resolve_prompt_path()}\n")
+        print(prompt)
+
+
 async def run_summaries(
     match_id: Optional[int] = None,
     *,
@@ -195,7 +169,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate AI match summaries")
     parser.add_argument("--match-id", type=int, help="Single match ID")
     parser.add_argument("--force", action="store_true", help="Regenerate even if up to date")
+    parser.add_argument(
+        "--print-prompt",
+        action="store_true",
+        help="Print rendered prompt (requires --match-id), no API call",
+    )
     args = parser.parse_args()
+
+    if args.print_prompt:
+        if not args.match_id:
+            parser.error("--print-prompt requires --match-id")
+        asyncio.run(print_prompt_for_match(args.match_id))
+        return
+
     asyncio.run(run_summaries(match_id=args.match_id, force=args.force))
 
 

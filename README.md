@@ -26,8 +26,9 @@ PYTHONPATH=. python -m src.scraper.engine
 # Scheduler (full scrape every 4h, quick every 30min, AI every 2h)
 PYTHONPATH=. python -m src.scraper.scheduler
 
-# AI summaries (matches with 2+ predictions)
+# AI summaries (matches with 2+ predictions); prompt template: prompts/ai_match_summary.txt
 PYTHONPATH=. python -m src.ai.summarizer
+PYTHONPATH=. python -m src.ai.summarizer --match-id 42 --print-prompt
 PYTHONPATH=. python -m src.ai.summarizer --match-id 42 --force
 
 # REST API
