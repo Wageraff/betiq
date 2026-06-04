@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Team
-from src.scraper.utils.match_key import normalize_team_name
+from src.scraper.utils.team_names import normalize_team_name
 
 
 async def get_or_create_team(

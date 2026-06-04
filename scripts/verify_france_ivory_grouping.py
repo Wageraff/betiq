@@ -13,7 +13,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from src.scraper.utils.match_key import build_match_key, normalize_team_name
+from src.scraper.utils.match_key import build_match_key
+from src.scraper.utils.team_names import normalize_team_name
 
 # Имена команд, как их отдают сайты (curl / парсеры)
 CASES = [
