@@ -30,9 +30,21 @@ echo "==> alembic"
 export PYTHONPATH="$APP_DIR"
 "$PY" -m alembic upgrade head
 
-if [[ -d "$APP_DIR/admin-ui" ]] && command -v npm &>/dev/null; then
-  echo "==> admin-ui build"
-  (cd "$APP_DIR/admin-ui" && npm ci --silent 2>/dev/null || npm install --silent) && npm run build
+_admin_dist="$APP_DIR/admin-ui/dist/index.html"
+if [[ -d "$APP_DIR/admin-ui" ]]; then
+  _node_major=0
+  if command -v node &>/dev/null; then
+    _node_major="$(node -e 'console.log(parseInt(process.versions.node.split(".")[0], 10))' 2>/dev/null || echo 0)"
+  fi
+  if [[ "$_node_major" -ge 18 ]] && command -v npm &>/dev/null; then
+    echo "==> admin-ui build (Node $_node_major)"
+    (cd "$APP_DIR/admin-ui" && (npm ci --silent 2>/dev/null || npm install --silent) && npm run build)
+  elif [[ -f "$_admin_dist" ]]; then
+    echo "==> admin-ui: skip build (Node ${_node_major:-?} < 18; using committed admin-ui/dist)"
+  else
+    echo "WARN: admin-ui/dist missing and Node < 18 — install Node 20 or build locally and git push dist"
+    echo "      See: deploy/scripts/install_node20.sh"
+  fi
 fi
 
 echo "==> restart services (if installed)"
