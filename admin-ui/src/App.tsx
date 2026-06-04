@@ -1,6 +1,7 @@
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useState } from "react";
 import MatchesPage from "./pages/MatchesPage";
+import MatchDetailPage from "./pages/MatchDetailPage";
 import TeamsPage from "./pages/TeamsPage";
 import AiPage from "./pages/AiPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -42,7 +43,11 @@ function LoginGate({ children }: { children: React.ReactNode }) {
 
 function Nav() {
   const loc = useLocation();
-  const cls = (path: string) => (loc.pathname === path ? "active" : "");
+  const cls = (path: string) => {
+    if (path === "/" && (loc.pathname === "/" || loc.pathname.startsWith("/matches/")))
+      return "active";
+    return loc.pathname === path ? "active" : "";
+  };
 
   return (
     <nav>
@@ -83,6 +88,7 @@ export default function App() {
         <main className="main">
           <Routes>
             <Route path="/" element={<MatchesPage />} />
+            <Route path="/matches/:id" element={<MatchDetailPage />} />
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/ai" element={<AiPage />} />
             <Route path="/settings" element={<SettingsPage />} />

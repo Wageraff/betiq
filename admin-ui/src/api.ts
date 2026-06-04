@@ -43,6 +43,7 @@ export const api = {
 
 export type MatchBrief = {
   id: number;
+  match_key?: string | null;
   slug: string | null;
   team_home: string;
   team_away: string;
@@ -51,6 +52,55 @@ export type MatchBrief = {
   match_date: string | null;
   predictions_count: number;
   has_ai: boolean;
+  ai_confidence?: string | null;
+};
+
+export type PredictionBet = {
+  bet_pick: string | null;
+  odds: string | number | null;
+  bet_type: string | null;
+  is_main: boolean;
+};
+
+export type PredictionDetail = {
+  id: number;
+  source: string;
+  language: string;
+  author: string | null;
+  source_url: string;
+  title: string | null;
+  full_text: string | null;
+  scraped_at: string | null;
+  bets: PredictionBet[];
+};
+
+export type MatchDetail = {
+  match: MatchBrief;
+  predictions: PredictionDetail[];
+  ai_summary: string | null;
+  ai_top_pick: string | null;
+  ai_confidence: string | null;
+  ai_generated_at: string | null;
+  ai_model: string | null;
+};
+
+export type TeamBriefInGroup = {
+  id: number;
+  normalized_key: string;
+  display_name: string;
+  sport: string | null;
+  logo_url: string | null;
+};
+
+export type TeamDuplicateGroup = {
+  canonical_key: string;
+  canonical_display: string;
+  teams: TeamBriefInGroup[];
+};
+
+export type TeamDuplicatesOut = {
+  groups: TeamDuplicateGroup[];
+  total_groups: number;
 };
 
 export type Team = {

@@ -27,8 +27,40 @@ class TeamUpdate(BaseModel):
     aliases: Optional[str] = None
 
 
+class TeamBriefInGroup(BaseModel):
+    id: int
+    normalized_key: str
+    display_name: str
+    sport: Optional[str] = None
+    logo_url: Optional[str] = None
+
+
+class TeamDuplicateGroup(BaseModel):
+    canonical_key: str
+    canonical_display: str
+    teams: list[TeamBriefInGroup]
+
+
+class TeamDuplicatesOut(BaseModel):
+    groups: list[TeamDuplicateGroup]
+    total_groups: int
+
+
+class TeamMergeRequest(BaseModel):
+    keeper_id: int
+    duplicate_ids: list[int] = Field(min_length=1)
+
+
+class TeamMergeResponse(BaseModel):
+    ok: bool
+    message: str
+    team: Optional[TeamOut] = None
+    merged_count: int
+
+
 class AdminMatchBrief(BaseModel):
     id: int
+    match_key: Optional[str] = None
     slug: Optional[str] = None
     team_home: str
     team_away: str
@@ -63,6 +95,7 @@ class AdminPredictionOut(BaseModel):
     author: Optional[str] = None
     source_url: str
     title: Optional[str] = None
+    full_text: Optional[str] = None
     scraped_at: Optional[datetime] = None
     bets: list[AdminBetOut] = Field(default_factory=list)
 

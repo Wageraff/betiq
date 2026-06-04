@@ -9,10 +9,20 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.deps import require_admin
-from src.api.admin.schemas import TeamOut, TeamUpdate
+from src.api.admin.schemas import (
+    TeamBriefInGroup,
+    TeamDuplicateGroup,
+    TeamDuplicatesOut,
+    TeamMergeRequest,
+    TeamMergeResponse,
+    TeamOut,
+    TeamUpdate,
+)
 from src.api.deps import get_db
 from src.config import BASE_DIR
 from src.db.models import Team
+from src.db.team_dedupe import dedupe_teams, find_duplicate_groups, merge_teams_by_ids
+from src.scraper.utils.team_names import canonical_team_display
 
 router = APIRouter(prefix="/teams", tags=["admin-teams"])
 
@@ -59,6 +69,70 @@ async def list_teams(
     stmt = stmt.order_by(Team.display_name).offset((page - 1) * limit).limit(limit)
     teams = (await db.scalars(stmt)).all()
     return [_team_out(t) for t in teams]
+
+
+@router.get("/duplicates", response_model=TeamDuplicatesOut)
+async def list_team_duplicates(
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    teams = list(await db.scalars(select(Team).order_by(Team.id)))
+    groups = find_duplicate_groups(teams)
+    out_groups = []
+    for canon_key, group in groups:
+        out_groups.append(
+            TeamDuplicateGroup(
+                canonical_key=canon_key,
+                canonical_display=canonical_team_display(canon_key),
+                teams=[
+                    TeamBriefInGroup(
+                        id=t.id,
+                        normalized_key=t.normalized_key,
+                        display_name=t.display_name,
+                        sport=t.sport,
+                        logo_url=_logo_url(t),
+                    )
+                    for t in group
+                ],
+            )
+        )
+    return TeamDuplicatesOut(groups=out_groups, total_groups=len(out_groups))
+
+
+@router.post("/merge", response_model=TeamMergeResponse)
+async def merge_teams(
+    body: TeamMergeRequest,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    try:
+        keeper = await merge_teams_by_ids(db, body.keeper_id, body.duplicate_ids)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    await db.commit()
+    await db.refresh(keeper)
+    n = len([i for i in body.duplicate_ids if i != body.keeper_id])
+    return TeamMergeResponse(
+        ok=True,
+        message=f"Merged {n} team(s) into #{keeper.id}",
+        team=_team_out(keeper),
+        merged_count=n,
+    )
+
+
+@router.post("/merge-auto", response_model=TeamMergeResponse)
+async def merge_teams_auto(
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    removed = await dedupe_teams(db, dry_run=False)
+    await db.commit()
+    return TeamMergeResponse(
+        ok=True,
+        message=f"Auto-merged {removed} duplicate team(s)",
+        team=None,
+        merged_count=removed,
+    )
 
 
 @router.get("/{team_id}", response_model=TeamOut)

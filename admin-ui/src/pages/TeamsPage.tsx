@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
-import { api, Team } from "../api";
+import {
+  api,
+  Team,
+  TeamDuplicateGroup,
+  TeamDuplicatesOut,
+} from "../api";
 
 export default function TeamsPage() {
   const [teams, setTeams] = useState<Team[]>([]);
+  const [dupGroups, setDupGroups] = useState<TeamDuplicateGroup[]>([]);
+  const [keepers, setKeepers] = useState<Record<string, number>>({});
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Team | null>(null);
   const [displayName, setDisplayName] = useState("");
@@ -10,14 +17,26 @@ export default function TeamsPage() {
   const [aliases, setAliases] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
+  const [merging, setMerging] = useState(false);
 
   const load = async () => {
     setError("");
     const params = new URLSearchParams({ limit: "100" });
     if (q) params.set("q", q);
     try {
-      const data = await api.get<Team[]>(`/teams?${params}`);
-      setTeams(data);
+      const [teamList, dups] = await Promise.all([
+        api.get<Team[]>(`/teams?${params}`),
+        api.get<TeamDuplicatesOut>("/teams/duplicates"),
+      ]);
+      setTeams(teamList);
+      setDupGroups(dups.groups);
+      const next: Record<string, number> = {};
+      for (const g of dups.groups) {
+        const preferred =
+          g.teams.find((t) => t.normalized_key === g.canonical_key) || g.teams[0];
+        next[g.canonical_key] = preferred.id;
+      }
+      setKeepers(next);
     } catch (e) {
       setError(String(e));
     }
@@ -63,13 +82,104 @@ export default function TeamsPage() {
     }
   };
 
+  const mergeGroup = async (group: TeamDuplicateGroup) => {
+    const keeperId = keepers[group.canonical_key];
+    const duplicateIds = group.teams
+      .map((t) => t.id)
+      .filter((id) => id !== keeperId);
+    if (!keeperId || duplicateIds.length === 0) return;
+    setMerging(true);
+    setError("");
+    try {
+      const res = await api.post<{ message: string }>("/teams/merge", {
+        keeper_id: keeperId,
+        duplicate_ids: duplicateIds,
+      });
+      setMsg(res.message);
+      if (selected && duplicateIds.includes(selected.id)) {
+        setSelected(null);
+      }
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const mergeAllAuto = async () => {
+    setMerging(true);
+    setError("");
+    try {
+      const res = await api.post<{ message: string }>("/teams/merge-auto", {});
+      setMsg(res.message);
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setMerging(false);
+    }
+  };
+
   return (
     <>
       <h2>Справочник команд / соперников</h2>
       <p style={{ color: "var(--muted)" }}>
-        Справочник ведётся на английском (как ключи match_key). При парсинге варианты
-        с сайтов (RO/RU) попадают в алиасы. Названия на карточках матчей — как на источнике.
+        Справочник на английском (ключи как в match_key). Варианты с сайтов — в алиасах.
       </p>
+
+      {dupGroups.length > 0 && (
+        <section className="panel dup-groups">
+          <div className="dup-groups-head">
+            <h3>Дубликаты ({dupGroups.length})</h3>
+            <button
+              className="secondary"
+              disabled={merging}
+              onClick={mergeAllAuto}
+            >
+              Объединить все автоматически
+            </button>
+          </div>
+          {dupGroups.map((g) => (
+            <div key={g.canonical_key} className="dup-group">
+              <div className="dup-group-title">
+                <strong>{g.canonical_display}</strong>
+                <code>{g.canonical_key}</code>
+              </div>
+              <ul>
+                {g.teams.map((t) => (
+                  <li key={t.id}>
+                    <label>
+                      <input
+                        type="radio"
+                        name={`keeper-${g.canonical_key}`}
+                        checked={keepers[g.canonical_key] === t.id}
+                        onChange={() =>
+                          setKeepers((k) => ({
+                            ...k,
+                            [g.canonical_key]: t.id,
+                          }))
+                        }
+                      />
+                      #{t.id} {t.display_name}{" "}
+                      <span style={{ color: "var(--muted)" }}>
+                        ({t.normalized_key})
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <button
+                disabled={merging}
+                onClick={() => mergeGroup(g)}
+              >
+                Объединить в выбранную
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
+
       <div className="filters panel">
         <input
           placeholder="Поиск"
@@ -104,11 +214,7 @@ export default function TeamsPage() {
                 >
                   <td>
                     {t.logo_url ? (
-                      <img
-                        src={t.logo_url}
-                        alt=""
-                        className="team-logo"
-                      />
+                      <img src={t.logo_url} alt="" className="team-logo" />
                     ) : (
                       "—"
                     )}

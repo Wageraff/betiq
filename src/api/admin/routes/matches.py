@@ -26,6 +26,7 @@ router = APIRouter(prefix="/matches", tags=["admin-matches"])
 def _brief(m: Match) -> AdminMatchBrief:
     return AdminMatchBrief(
         id=m.id,
+        match_key=m.match_key,
         slug=m.slug,
         team_home=m.team_home,
         team_away=m.team_away,
@@ -118,6 +119,7 @@ async def get_match(
                 author=p.author,
                 source_url=p.source_url,
                 title=p.title,
+                full_text=p.full_text,
                 scraped_at=p.scraped_at,
                 bets=[
                     AdminBetOut(

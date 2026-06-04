@@ -79,9 +79,13 @@ export default function MatchesPage() {
           <tbody>
             {items.map((m) => (
               <tr key={m.id}>
-                <td>{m.id}</td>
                 <td>
-                  {m.team_home} — {m.team_away}
+                  <Link to={`/matches/${m.id}`}>{m.id}</Link>
+                </td>
+                <td>
+                  <Link to={`/matches/${m.id}`}>
+                    {m.team_home} — {m.team_away}
+                  </Link>
                 </td>
                 <td>{m.sport || "—"}</td>
                 <td>

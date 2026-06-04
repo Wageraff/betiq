@@ -24,7 +24,11 @@
 - FastAPI: `/admin` — SPA, `/uploads` — картинки команд
 - Документация в `instructions/admin.md`
 
-## Дальше (не в первой итерации)
+## Этап 5 (✓)
+- **Карточка матча** `/admin/matches/:id` — полный текст прогнозов (`full_text`), ставки, AI-сводка
+- **Дубликаты команд** — `GET /teams/duplicates`, `POST /teams/merge`, `POST /teams/merge-auto`
+
+## Дальше
 - Редактирование `.env` и `proxies.txt` через UI (осторожно с секретами)
 - Роли пользователей, audit log
 - WebSocket для live-логов парсера
