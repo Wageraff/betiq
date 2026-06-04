@@ -12,8 +12,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from sqlalchemy import delete, select
 

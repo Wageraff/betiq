@@ -5,7 +5,13 @@
 """
 from __future__ import annotations
 
+import sys
 from datetime import date
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from src.scraper.utils.match_key import build_match_key, normalize_team_name
 
