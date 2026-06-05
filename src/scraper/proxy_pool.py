@@ -16,6 +16,20 @@ _AREA_RE = re.compile(r"area-[a-z]{2}", re.I)
 _SESSION_RE = re.compile(r"session-[^_]+", re.I)
 
 
+def _rebuild_proxy_url(proxy: str, username: str) -> str:
+    """ParseResult._replace не принимает username — пересобираем netloc."""
+    p = urlparse(proxy)
+    password = p.password or ""
+    host = p.hostname or ""
+    hostport = f"{host}:{p.port}" if p.port else host
+    if username or password:
+        auth = f"{username}:{password}" if password else username
+        netloc = f"{auth}@{hostport}"
+    else:
+        netloc = hostport
+    return urlunparse((p.scheme, netloc, p.path, p.params, p.query, p.fragment))
+
+
 def apply_proxy_geo(proxy: str, geo: Optional[str]) -> str:
     """Подставить area-XX в username по geo источника."""
     if not proxy or not geo:
@@ -26,7 +40,7 @@ def apply_proxy_geo(proxy: str, geo: Optional[str]) -> str:
     if not _AREA_RE.search(user):
         return proxy
     user = _AREA_RE.sub(f"area-{code}", user, count=1)
-    return urlunparse(p._replace(username=user))
+    return _rebuild_proxy_url(proxy, user)
 
 
 def _inject_session(username: str, session: str) -> str:
@@ -42,7 +56,7 @@ def build_proxy_url(base: str, session: str, geo: Optional[str]) -> str:
     """Собрать URL прокси: session + area-{geo} в username."""
     p = urlparse(base)
     user = _inject_session(p.username or "", session)
-    return apply_proxy_geo(urlunparse(p._replace(username=user)), geo)
+    return apply_proxy_geo(_rebuild_proxy_url(base, user), geo)
 
 
 class ProxyPool:
