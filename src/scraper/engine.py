@@ -358,6 +358,29 @@ async def scrape_source(
     return scrape_log
 
 
+async def run_scrape_source(
+    scraper_module: str,
+    *,
+    limit: Optional[int] = None,
+    force: bool = False,
+) -> Optional[ScrapeLog]:
+    """Один источник по scraper_module; для Retry в Telegram."""
+    ensure_proxy_configured()
+    async with browser_lifecycle():
+        async with async_session_factory() as session:
+            source = await session.scalar(
+                select(Source).where(Source.scraper_module == scraper_module)
+            )
+            if not source or not source.scraper_module:
+                return None
+            return await scrape_source(
+                session,
+                _snap_source(source),
+                limit=limit,
+                force=force,
+            )
+
+
 async def run_scrape(
     source_name: Optional[str] = None,
     limit: Optional[int] = None,

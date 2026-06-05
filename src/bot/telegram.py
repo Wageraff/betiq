@@ -29,7 +29,7 @@ from src.config import settings, setup_logging
 from src.db.models import HealthCheck, Match, Prediction, ScrapeLog, Source
 from src.db.session import async_session_factory
 from src.scraper.diagnose import diagnose_source
-from src.scraper.engine import run_scrape
+from src.scraper.engine import run_scrape, run_scrape_source
 from src.scraper.utils.alerter import send_message
 from src.scraper.utils.browser import browser_lifecycle
 
@@ -389,6 +389,45 @@ async def add_source_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
+async def _edit_retry_result(query, text: str) -> None:
+    try:
+        await query.edit_message_text(text)
+    except Exception:
+        log.warning("Could not edit retry message, sending new one")
+        await send_message(text)
+
+
+async def _retry_scrape_task(
+    query,
+    *,
+    scraper_module: str,
+    source_name: str,
+) -> None:
+    try:
+        scrape_log = await run_scrape_source(scraper_module)
+        if scrape_log is None:
+            await _edit_retry_result(query, f"❌ Source not found: {source_name}")
+            return
+        if scrape_log.status == "error":
+            err = (scrape_log.error_msg or "unknown")[:400]
+            await _edit_retry_result(
+                query, f"❌ Retry failed: {source_name}\n{err}"
+            )
+        elif scrape_log.items_found == 0:
+            await _edit_retry_result(
+                query, f"⚠️ Retry partial: {source_name} (no articles found)"
+            )
+        else:
+            await _edit_retry_result(
+                query,
+                f"✅ Retry OK: {source_name}\n"
+                f"found: {scrape_log.items_found}, new: {scrape_log.items_new}",
+            )
+    except Exception as e:
+        log.exception("Retry scrape failed for %s", source_name)
+        await _edit_retry_result(query, f"❌ Retry error: {source_name}\n{e}")
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -402,8 +441,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             sid = int(data.split(":")[1])
             source = await session.get(Source, sid)
             if source and source.scraper_module:
-                await query.edit_message_text(f"Retrying scrape: {source.name}…")
-                asyncio.create_task(run_scrape(source_name=source.scraper_module))
+                await query.edit_message_text(
+                    f"⏳ Retrying scrape: {source.name}…"
+                )
+                asyncio.create_task(
+                    _retry_scrape_task(
+                        query,
+                        scraper_module=source.scraper_module,
+                        source_name=source.name,
+                    )
+                )
         elif data.startswith("source_disable:"):
             sid = int(data.split(":")[1])
             source = await session.get(Source, sid)
