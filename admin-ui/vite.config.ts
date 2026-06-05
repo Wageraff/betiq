@@ -8,7 +8,7 @@ function stripCrossOrigin(): Plugin {
     name: "strip-crossorigin",
     enforce: "post",
     transformIndexHtml(html) {
-      return html.replace(/ crossorigin/g, "").replace(/ type="module"/g, " defer");
+      return html.replace(/ crossorigin/g, "").replace(/ type="module"/g, "");
     },
   };
 }
