@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from typing import Optional
-from urllib.parse import quote, unquote, urlparse, urlunparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 from src.config import load_proxies, load_proxy_sessions
 
@@ -215,11 +215,7 @@ class ProxyPool:
 
     @staticmethod
     def to_playwright(proxy: str) -> dict | None:
-        """Формат для Playwright new_context: только server, auth в URL.
-
-        Отдельные username/password в per-context proxy дают
-        «Got unexpected field names: ['username']» на Chromium.
-        """
+        """Формат Playwright для chromium.launch(proxy=...)."""
         if not proxy:
             return None
         p = urlparse(proxy)
@@ -228,12 +224,12 @@ class ProxyPool:
         port = p.port
         if not host:
             return None
-        server = f"{scheme}://{host}:{port}"
+        out: dict[str, str] = {"server": f"{scheme}://{host}:{port}"}
         if p.username:
-            user = quote(unquote(p.username), safe="")
-            pw = quote(unquote(p.password or ""), safe="")
-            server = f"{scheme}://{user}:{pw}@{host}:{port}"
-        return {"server": server}
+            out["username"] = unquote(p.username)
+        if p.password:
+            out["password"] = unquote(p.password)
+        return out
 
     @property
     def has_proxies(self) -> bool:

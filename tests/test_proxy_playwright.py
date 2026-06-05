@@ -1,14 +1,14 @@
 from src.scraper.proxy_pool import ProxyPool, apply_proxy_geo, build_proxy_url
 
 
-def test_to_playwright_embeds_auth_in_server_url():
+def test_to_playwright_splits_auth_fields():
     proxy = "http://user_area-RO_session-betiq001:secret@gate.example.com:3120"
     pw = ProxyPool.to_playwright(proxy)
-    assert pw is not None
-    assert set(pw) == {"server"}
-    assert pw["server"] == (
-        "http://user_area-RO_session-betiq001:secret@gate.example.com:3120"
-    )
+    assert pw == {
+        "server": "http://gate.example.com:3120",
+        "username": "user_area-RO_session-betiq001",
+        "password": "secret",
+    }
 
 
 def test_to_playwright_without_auth():

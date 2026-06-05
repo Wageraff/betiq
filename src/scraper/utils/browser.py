@@ -33,7 +33,6 @@ log = logging.getLogger("browser")
 _PROXY_ERRORS = ("ERR_CERT", "ERR_CONNECTION", "ERR_PROXY", "ERR_TUNNEL", "net::")
 
 _playwright: Optional[Playwright] = None
-_browser: Optional[Browser] = None
 _proxy_pool = ProxyPool()
 
 _geo_ctx: ContextVar[Optional[str]] = ContextVar("scraper_proxy_geo", default=None)
@@ -245,8 +244,15 @@ async def verify_proxy_access(page: Page, url: str) -> bool:
     return True
 
 
-async def _launch_browser() -> Browser:
-    launch_args = {
+async def _ensure_playwright() -> Playwright:
+    global _playwright
+    if _playwright is None:
+        _playwright = await async_playwright().start()
+    return _playwright
+
+
+def _launch_kwargs(pw_proxy: Optional[dict] = None) -> dict:
+    launch_args: dict = {
         "headless": settings.headless,
         "args": [
             "--disable-blink-features=AutomationControlled",
@@ -254,31 +260,37 @@ async def _launch_browser() -> Browser:
             "--disable-dev-shm-usage",
         ],
     }
+    if pw_proxy:
+        launch_args["proxy"] = pw_proxy
+    return launch_args
 
-    # Chromium: per-context proxy требует dummy global proxy при launch.
-    if _proxy_pool.has_proxies:
-        launch_args["proxy"] = {"server": "per-context"}
 
-    global _playwright, _browser
-    if _playwright is None:
-        _playwright = await async_playwright().start()
-    if _browser is None:
-        _browser = await _playwright.chromium.launch(**launch_args)
-    return _browser
+async def _launch_browser(pw_proxy: Optional[dict] = None) -> Browser:
+    """Отдельный browser на сессию; прокси на launch (как reference_scraper)."""
+    pw = await _ensure_playwright()
+    return await pw.chromium.launch(**_launch_kwargs(pw_proxy))
 
 
 async def new_context(
     geo: Optional[str] = None,
     *,
     source_module: Optional[str] = None,
-) -> Tuple[BrowserContext, Optional[str]]:
+) -> Tuple[BrowserContext, Optional[str], Browser]:
     geo = _resolve_geo(geo)
     source_module = _resolve_source_module(source_module)
     proxy = _proxy_pool.get(geo=geo, source_module=source_module)
     if settings.require_proxy and not proxy:
         raise RuntimeError("No available proxies")
 
-    browser = await _launch_browser()
+    pw_proxy = ProxyPool.to_playwright(proxy)
+    if proxy:
+        log.info(
+            "Using proxy %s (area-%s, source=%s)",
+            ProxyPool._mask(proxy),
+            geo or "?",
+            source_module or "?",
+        )
+    browser = await _launch_browser(pw_proxy)
     ctx_kw: dict = {
         "user_agent": random.choice(USER_AGENTS),
         "viewport": {"width": settings.viewport_width, "height": settings.viewport_height},
@@ -286,24 +298,21 @@ async def new_context(
         "timezone_id": _browser_timezone(geo),
         "ignore_https_errors": True,
     }
-    pw_proxy = ProxyPool.to_playwright(proxy)
-    if pw_proxy:
-        ctx_kw["proxy"] = pw_proxy
 
     context = await browser.new_context(**ctx_kw)
     await attach_resource_blocking(context)
-    return context, proxy
+    return context, proxy, browser
 
 
-async def new_page(geo: Optional[str] = None) -> Tuple[Page, BrowserContext, Optional[str]]:
-    context, proxy = await new_context(geo=geo)
+async def new_page(geo: Optional[str] = None) -> Tuple[Page, BrowserContext, Optional[str], Browser]:
+    context, proxy, browser = await new_context(geo=geo)
     page = await context.new_page()
     if HAS_STEALTH:
         try:
             await stealth_async(page)
         except Exception as e:
             log.debug("stealth: %s", e)
-    return page, context, proxy
+    return page, context, proxy, browser
 
 
 @asynccontextmanager
@@ -322,9 +331,10 @@ async def page_session(
 
     for attempt_geo in candidates:
         context: Optional[BrowserContext] = None
+        browser: Optional[Browser] = None
         proxy: Optional[str] = None
         try:
-            context, proxy = await new_context(geo=attempt_geo)
+            context, proxy, browser = await new_context(geo=attempt_geo)
             page = await context.new_page()
             if HAS_STEALTH:
                 try:
@@ -346,6 +356,8 @@ async def page_session(
                         attempt_geo,
                     )
                     await context.close()
+                    if browser is not None:
+                        await browser.close()
                     last_geo = attempt_geo
                     continue
                 log.info("Proxy OK for geo=%s", attempt_geo)
@@ -354,10 +366,14 @@ async def page_session(
                 yield page, proxy
             finally:
                 await context.close()
+                if browser is not None:
+                    await browser.close()
             return
         except Exception:
             if context is not None:
                 await context.close()
+            if browser is not None:
+                await browser.close()
             raise
 
     tried = ", ".join(str(g) for g in candidates)
@@ -368,10 +384,7 @@ async def page_session(
 
 
 async def shutdown() -> None:
-    global _playwright, _browser
-    if _browser is not None:
-        await _browser.close()
-        _browser = None
+    global _playwright
     if _playwright is not None:
         await _playwright.stop()
         _playwright = None
