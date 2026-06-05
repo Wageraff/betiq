@@ -47,6 +47,13 @@ if [[ -d "$APP_DIR/admin-ui" ]]; then
   fi
 fi
 
+echo "==> proxy_pool check"
+if ! grep -q '_rebuild_proxy_url' "$APP_DIR/src/scraper/proxy_pool.py"; then
+  echo "ERROR: proxy_pool.py без фикса _rebuild_proxy_url — git pull не подтянул код"
+  exit 1
+fi
+"$PY" -c "from src.scraper.proxy_pool import build_proxy_url; build_proxy_url('http://u_area-RO_session-betiq001:p@h:3120','betiq004','RU')"
+
 echo "==> restart services (if installed)"
 for unit in betiq-api betiq-scheduler betiq-telegram; do
   if systemctl list-unit-files "$unit.service" &>/dev/null; then

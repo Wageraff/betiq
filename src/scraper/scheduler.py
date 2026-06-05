@@ -15,8 +15,31 @@ from src.ai.summarizer import run_summaries
 from src.config import settings, setup_logging
 from src.scraper.engine import run_scrape
 from src.scraper.health_check import run_health_checks
+from src.scraper.proxy_pool import build_proxy_url
 
 log = logging.getLogger("scheduler")
+
+
+def _verify_proxy_pool() -> None:
+    """Стартовая проверка: старый proxy_pool.py падает с username/_replace."""
+    try:
+        url = build_proxy_url(
+            "http://user_area-RO_session-betiq001:pass@proxy.example.com:3120",
+            "betiq004",
+            "RU",
+        )
+    except ValueError as e:
+        log.critical(
+            "proxy_pool self-check failed (%s). "
+            "На сервере старый код — выполните: cd /opt/betiq && git pull && "
+            "sudo systemctl restart betiq-scheduler",
+            e,
+        )
+        raise SystemExit(1) from e
+    if "area-RU" not in url or "session-betiq004" not in url:
+        log.critical("proxy_pool self-check: unexpected URL %s", url)
+        raise SystemExit(1)
+    log.info("proxy_pool self-check OK")
 
 _JOB_KW = {"max_instances": 1, "coalesce": True}
 
@@ -45,6 +68,7 @@ async def job_health_check() -> None:
 
 def main() -> None:
     setup_logging()
+    _verify_proxy_pool()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
