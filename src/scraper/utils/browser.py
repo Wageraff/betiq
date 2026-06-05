@@ -255,6 +255,10 @@ async def _launch_browser() -> Browser:
         ],
     }
 
+    # Chromium: per-context proxy требует dummy global proxy при launch.
+    if _proxy_pool.has_proxies:
+        launch_args["proxy"] = {"server": "per-context"}
+
     global _playwright, _browser
     if _playwright is None:
         _playwright = await async_playwright().start()
