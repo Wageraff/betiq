@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
 
 /** same-origin SPA: crossorigin на module script иногда даёт зависший Pending */
 function stripCrossOrigin(): Plugin {
@@ -7,13 +8,14 @@ function stripCrossOrigin(): Plugin {
     name: "strip-crossorigin",
     enforce: "post",
     transformIndexHtml(html) {
-      return html.replace(/ crossorigin/g, "");
+      return html.replace(/ crossorigin/g, "").replace(/ type="module"/g, " defer");
     },
   };
 }
 
 export default defineConfig({
-  plugins: [react(), stripCrossOrigin()],
+  // Один index.html без отдельного .js — обход зависшего Pending на крупном бандле
+  plugins: [react(), viteSingleFile(), stripCrossOrigin()],
   base: "/admin/",
   server: {
     port: 5173,
@@ -25,5 +27,6 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    cssCodeSplit: false,
   },
 });

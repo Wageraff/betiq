@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,21 +35,56 @@ uploads.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads)), name="uploads")
 
 _admin_dist = BASE_DIR / "admin-ui" / "dist"
+_ASSET_MEDIA = {
+    ".js": "application/javascript",
+    ".css": "text/css",
+    ".map": "application/json",
+}
+
+
+def _admin_index() -> Path:
+    index = _admin_dist / "index.html"
+    if not index.is_file():
+        raise HTTPException(
+            503,
+            "Admin UI not built. Run: cd admin-ui && npm install && npm run build",
+        )
+    return index
+
+
 if _admin_dist.is_dir():
-    app.mount("/admin/assets", StaticFiles(directory=str(_admin_dist / "assets")), name="admin-assets")
+    _admin_assets = _admin_dist / "assets"
+    if _admin_assets.is_dir():
+
+        @app.get("/admin/assets/{asset_path:path}")
+        async def admin_asset(asset_path: str, request: Request):
+            """Статика админки: pre-gzip .gz при наличии, иначе оригинал."""
+            path = (_admin_assets / asset_path).resolve()
+            if not str(path).startswith(str(_admin_assets.resolve())):
+                raise HTTPException(404)
+            if not path.is_file():
+                raise HTTPException(404)
+            media = _ASSET_MEDIA.get(path.suffix, "application/octet-stream")
+            accept = request.headers.get("accept-encoding", "")
+            gz_path = Path(f"{path}.gz")
+            if "gzip" in accept.lower() and gz_path.is_file():
+                return FileResponse(
+                    gz_path,
+                    media_type=media,
+                    headers={
+                        "Content-Encoding": "gzip",
+                        "Vary": "Accept-Encoding",
+                    },
+                )
+            return FileResponse(path, media_type=media)
 
     @app.get("/admin")
     async def admin_root():
-        return FileResponse(_admin_dist / "index.html")
+        return FileResponse(_admin_index(), media_type="text/html")
 
     @app.get("/admin/{full_path:path}")
     async def admin_spa(full_path: str = ""):
-        index = _admin_dist / "index.html"
-        if not index.is_file():
-            return {
-                "detail": "Admin UI not built. Run: cd admin-ui && npm install && npm run build"
-            }
-        return FileResponse(index)
+        return FileResponse(_admin_index(), media_type="text/html")
 
 
 @app.get("/health")
