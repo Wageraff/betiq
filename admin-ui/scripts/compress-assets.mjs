@@ -1,20 +1,29 @@
-/** Pre-gzip dist/assets/*.{js,css} для отдачи с Content-Encoding: gzip */
+/** Pre-gzip dist для отдачи с Content-Encoding: gzip и фиксированным Content-Length */
 import { gzipSync } from "node:zlib";
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const dir = new URL("../dist/assets", import.meta.url);
-let files;
-try {
-  files = readdirSync(dir);
-} catch {
+const dist = join(dirname(fileURLToPath(import.meta.url)), "../dist");
+
+function gzipFile(path) {
+  const buf = readFileSync(path);
+  const gz = gzipSync(buf, { level: 9 });
+  writeFileSync(`${path}.gz`, gz);
+  console.log(`gzipped ${path.replace(dist + "/", "")} (${buf.length} -> ${gz.length} bytes)`);
+}
+
+const index = join(dist, "index.html");
+if (existsSync(index)) {
+  gzipFile(index);
+}
+
+const assets = join(dist, "assets");
+if (!existsSync(assets)) {
   process.exit(0);
 }
 
-for (const name of files) {
+for (const name of readdirSync(assets)) {
   if (!/\.(js|css)$/.test(name)) continue;
-  const path = join(dir.pathname, name);
-  const buf = readFileSync(path);
-  writeFileSync(`${path}.gz`, gzipSync(buf, { level: 9 }));
-  console.log(`gzipped ${name} (${buf.length} -> ${gzipSync(buf, { level: 9 }).length} bytes)`);
+  gzipFile(join(assets, name));
 }

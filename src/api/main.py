@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -52,6 +52,30 @@ def _admin_index() -> Path:
     return index
 
 
+def _serve_admin_index(request: Request) -> Response:
+    """Pre-gzip + Content-Length: chunked-ответ GZipMiddleware обрывается по прямому IP."""
+    index = _admin_index()
+    accept = request.headers.get("accept-encoding", "")
+    gz_path = Path(f"{index}.gz")
+    if "gzip" in accept.lower() and gz_path.is_file():
+        body = gz_path.read_bytes()
+        return Response(
+            content=body,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Content-Encoding": "gzip",
+                "Content-Length": str(len(body)),
+                "Vary": "Accept-Encoding",
+            },
+        )
+    body = index.read_bytes()
+    return Response(
+        content=body,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Length": str(len(body))},
+    )
+
+
 if _admin_dist.is_dir():
     _admin_assets = _admin_dist / "assets"
     if _admin_assets.is_dir():
@@ -79,12 +103,12 @@ if _admin_dist.is_dir():
             return FileResponse(path, media_type=media)
 
     @app.get("/admin")
-    async def admin_root():
-        return FileResponse(_admin_index(), media_type="text/html")
+    async def admin_root(request: Request):
+        return _serve_admin_index(request)
 
     @app.get("/admin/{full_path:path}")
-    async def admin_spa(full_path: str = ""):
-        return FileResponse(_admin_index(), media_type="text/html")
+    async def admin_spa(request: Request, full_path: str = ""):
+        return _serve_admin_index(request)
 
 
 @app.get("/health")
