@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Починить справочник команд и слить дубликаты матчей (после git pull).
+"""Миграция справочника teams: пересчёт key/display, слияние дубликатов.
 
-  cd /opt/betiq && export PYTHONPATH=/opt/betiq
-  ./venv/bin/python3.11 scripts/repair_catalog.py
-  ./venv/bin/python3.11 scripts/repair_catalog.py --dry-run
+  cd /opt/betiq && git pull
+  ./venv/bin/python3.11 scripts/repair_catalog.py --dry-run   # посмотреть, что изменится
+  ./venv/bin/python3.11 scripts/repair_catalog.py             # применить
+  sudo systemctl restart betiq-scheduler betiq-api
 """
 from __future__ import annotations
 

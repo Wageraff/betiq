@@ -8,15 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Match, Team
 from src.scraper.utils.team_names import (
+    canonical_key_from_names,
     canonical_team_display,
     canonical_team_key,
     merge_alias_text,
+    pick_best_display_raw,
     resolve_team_key,
 )
 
 
-def _canonical_for_team(team: Team) -> str:
-    """Один ключ для RU/RO/EN вариантов (display, key, aliases)."""
+def _team_name_candidates(team: Team, extra: list[str] | None = None) -> list[str]:
     candidates: list[str] = []
     if team.normalized_key:
         candidates.append(team.normalized_key)
@@ -24,17 +25,14 @@ def _canonical_for_team(team: Team) -> str:
         candidates.append(team.display_name)
     if team.aliases:
         candidates.extend(p.strip() for p in team.aliases.split(",") if p.strip())
-    keys = {
-        resolve_team_key(canonical_team_key(c))
-        for c in candidates
-        if c
-    }
-    keys.discard("")
-    if len(keys) == 1:
-        return keys.pop()
-    if team.display_name:
-        return resolve_team_key(canonical_team_key(team.display_name))
-    return resolve_team_key(team.normalized_key)
+    if extra:
+        candidates.extend(extra)
+    return candidates
+
+
+def _canonical_for_team(team: Team, extra_names: list[str] | None = None) -> str:
+    """Один ключ для RU/RO/EN вариантов (display, key, aliases, подписи в матчах)."""
+    return canonical_key_from_names(*_team_name_candidates(team, extra_names))
 
 
 def find_duplicate_groups(teams: list[Team]) -> list[tuple[str, list[Team]]]:
@@ -73,9 +71,21 @@ async def merge_team_into(
     await session.delete(dup)
 
 
-async def finalize_keeper(session: AsyncSession, keeper: Team, canon_key: str) -> Team:
-    canonical_name = canonical_team_display(canon_key, sport=keeper.sport)
+async def finalize_keeper(
+    session: AsyncSession,
+    keeper: Team,
+    canon_key: str,
+    *,
+    raw_name: str | None = None,
+    sport: str | None = None,
+) -> Team:
+    group_sport = sport or keeper.sport
+    canonical_name = canonical_team_display(
+        canon_key, raw_name=raw_name, sport=group_sport
+    )
     keeper.normalized_key = canon_key
+    if group_sport and not keeper.sport:
+        keeper.sport = group_sport
     if keeper.display_name != canonical_name:
         if keeper.display_name and keeper.display_name != canonical_name:
             keeper.aliases = merge_alias_text(keeper.aliases, keeper.display_name)
@@ -114,12 +124,19 @@ async def merge_teams_by_ids(
     return await finalize_keeper(session, keeper, canon_key)
 
 
-async def dedupe_teams(session: AsyncSession, *, dry_run: bool = False) -> int:
+async def dedupe_teams(
+    session: AsyncSession,
+    *,
+    dry_run: bool = False,
+    match_labels: dict[int, list[str]] | None = None,
+    match_sports: dict[int, list[str]] | None = None,
+) -> int:
     """Объединить строки teams с одним каноническим ключом; вернуть число удалённых."""
     teams = list(await session.scalars(select(Team).order_by(Team.id)))
     groups: dict[str, list[Team]] = defaultdict(list)
     for t in teams:
-        groups[_canonical_for_team(t)].append(t)
+        extra = (match_labels or {}).get(t.id, [])
+        groups[_canonical_for_team(t, extra)].append(t)
 
     removed = 0
     for canon_key, group in groups.items():
@@ -128,8 +145,14 @@ async def dedupe_teams(session: AsyncSession, *, dry_run: bool = False) -> int:
         group.sort(key=lambda t: (t.normalized_key != canon_key, t.id))
         keeper = group[0]
         sports = {t.sport for t in group if t.sport}
-        group_sport = sports.pop() if len(sports) == 1 else None
-        canonical_name = canonical_team_display(canon_key, sport=group_sport)
+        for tid in (t.id for t in group):
+            sports.update((match_sports or {}).get(tid, []))
+        group_sport = next(iter(sports)) if len(sports) == 1 else keeper.sport
+
+        name_pool: list[str] = []
+        for t in group:
+            name_pool.extend(_team_name_candidates(t, (match_labels or {}).get(t.id)))
+        best_raw = pick_best_display_raw(name_pool, canon_key)
 
         for dup in group[1:]:
             print(
@@ -144,7 +167,9 @@ async def dedupe_teams(session: AsyncSession, *, dry_run: bool = False) -> int:
 
         if dry_run:
             continue
-        await finalize_keeper(session, keeper, canon_key)
+        await finalize_keeper(
+            session, keeper, canon_key, raw_name=best_raw, sport=group_sport
+        )
 
     if not dry_run:
         await session.flush()

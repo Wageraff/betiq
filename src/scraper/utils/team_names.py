@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 
 from src.scraper.utils.team_catalog import ALL_CATALOG, EXTRA_ALIASES
 
@@ -11,6 +12,10 @@ CLUB_PREFIXES = re.compile(r"\b(fc|fk|sc|ac|sk|bk|if|afc|cf|rc)\b", re.I)
 _WOMEN_MARKER = re.compile(
     r"\(f\)|\(w\)|\(жен\.?\)|\(ж\.?\)|\(female\)|\(femei\)|\bwomen\b|\(f\.\)",
     re.I,
+)
+
+_YOUTH_MARKER = re.compile(
+    r"\((\d{1,2})\)|\b(?:U|u)[- ]?(\d{1,2})\b",
 )
 
 _WOMEN_KEY_SUFFIX = "women"
@@ -98,14 +103,63 @@ def _has_non_latin(text: str) -> bool:
     return False
 
 
+def _sorted_token_key(tokens: list[str]) -> str:
+    parts = [t for t in tokens if len(t) >= 2]
+    if len(parts) >= 2:
+        return "".join(sorted(parts))
+    return ""
+
+
 def _token_key(raw: str) -> str:
     """Игроки/клубы: sorted tokens из латинизированного raw (RU/EN → один ключ)."""
     latin = latinize_name(raw).lower()
-    tokens = re.findall(r"[a-z]{2,}", latin)
-    tokens = [t for t in tokens if len(t) > 1]
-    if len(tokens) >= 2:
-        return "".join(sorted(tokens))
-    return ""
+    return _sorted_token_key(re.findall(r"[a-z]{2,}", latin))
+
+
+def _glued_token_key(mechanical: str) -> str:
+    """Склеенное имя без пробелов → sorted tokens (felixaugeraliassime → aliassimeaugerfelix)."""
+    s = (mechanical or "").lower()
+    if len(s) < 10 or re.fullmatch(r"[a-z]+\d{1,2}", s):
+        return ""
+
+    n = len(s)
+    best: list[str] | None = None
+    best_score = -1
+
+    def score(parts: list[str]) -> int:
+        if len(parts) < 2 or len(parts) > 6:
+            return -1
+        if any(len(p) < 2 for p in parts):
+            return -1
+        total = sum(len(p) for p in parts)
+        sc = total * 10 - abs(len(parts) - 3) * 5
+        sc -= sum(3 for p in parts if len(p) == 2)
+        return sc
+
+    def partition(pos: int, parts: list[str]) -> None:
+        nonlocal best, best_score
+        if pos == n:
+            sc = score(parts)
+            if sc > best_score:
+                best_score = sc
+                best = parts[:]
+            return
+        if len(parts) >= 6:
+            return
+        remaining = n - pos
+        min_remaining = 2 * max(0, 1 - len(parts))
+        if remaining < min_remaining:
+            return
+        max_len = min(remaining - max(0, min_remaining - 2), 14)
+        for length in range(2, max_len + 1):
+            parts.append(s[pos : pos + length])
+            partition(pos + length, parts)
+            parts.pop()
+
+    partition(0, [])
+    if not best:
+        return ""
+    return _sorted_token_key(best)
 
 
 def _build_team_aliases() -> dict[str, str]:
@@ -142,6 +196,29 @@ def resolve_team_key(key: str) -> str:
     if not k:
         return ""
     return TEAM_ALIASES.get(k, k)
+
+
+def canonical_key_from_names(*names: str) -> str:
+    """Один ключ из всех написаний (repair / dedupe). При равенстве — каталог."""
+    keys: list[str] = []
+    for name in names:
+        name = (name or "").strip()
+        if not name:
+            continue
+        k = resolve_team_key(canonical_team_key(name))
+        if k:
+            keys.append(k)
+    if not keys:
+        return ""
+    counts = Counter(keys)
+    best_count = counts.most_common(1)[0][1]
+    top = [k for k, c in counts.items() if c == best_count]
+    if len(top) == 1:
+        return top[0]
+    for k in top:
+        if k in _CATALOG_KEYS:
+            return k
+    return min(top, key=len)
 
 
 def is_catalog_key(key: str) -> bool:
@@ -201,6 +278,10 @@ def _person_canonical(mechanical: str, raw: str) -> str:
     if token_key:
         return resolve_team_key(token_key)
 
+    glued = _glued_token_key(mechanical)
+    if glued:
+        return resolve_team_key(glued)
+
     latin = latinize_name(raw).lower()
     tokens = re.findall(r"[a-z]{2,}", latin)
     if len(tokens) == 1 and len(mechanical) > len(tokens[0]):
@@ -233,6 +314,26 @@ def _apply_women_suffix(base: str) -> str:
     return f"{base}{_WOMEN_KEY_SUFFIX}"
 
 
+def _extract_youth_age(raw: str) -> str | None:
+    m = _YOUTH_MARKER.search(raw)
+    if not m:
+        return None
+    return m.group(1) or m.group(2)
+
+
+def _youth_canonical_key(cleaned: str, age: str) -> str:
+    mechanical = _mechanical_key(cleaned)
+    if not mechanical:
+        return ""
+    base = resolve_team_key(mechanical)
+    if base in _COUNTRY_KEYS:
+        return f"{base}{age}"
+    person = resolve_team_key(_person_canonical(mechanical, cleaned))
+    if person in _COUNTRY_KEYS:
+        return f"{person}{age}"
+    return f"{base}{age}"
+
+
 def canonical_team_key(name: str) -> str:
     """
     Любое написание с любого сайта → один канонический ключ.
@@ -244,8 +345,16 @@ def canonical_team_key(name: str) -> str:
         return ""
 
     women = bool(_WOMEN_MARKER.search(raw))
+    youth_age = _extract_youth_age(raw) if not women else None
     cleaned = _WOMEN_MARKER.sub("", raw)
+    if youth_age:
+        cleaned = _YOUTH_MARKER.sub("", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if youth_age:
+        youth_key = _youth_canonical_key(cleaned, youth_age)
+        if youth_key:
+            return resolve_team_key(youth_key)
 
     mechanical = _mechanical_key(cleaned)
     if not mechanical:

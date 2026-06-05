@@ -31,9 +31,7 @@ def _match_team_label(raw: str, sport: str | None) -> str:
     if not raw:
         return raw
     key = canonical_team_key(raw)
-    if sport == "tennis":
-        return canonical_team_display(key, raw_name=raw, sport=sport) or raw
-    return canonical_team_display(key, sport=sport) or raw
+    return canonical_team_display(key, raw_name=raw, sport=sport) or raw
 
 
 def _refresh_match_fields(match: Match, data: dict) -> None:

@@ -64,7 +64,7 @@ async def get_or_create_team(
         raise ValueError(f"Cannot normalize team name: {name!r}")
 
     canon = resolve_team_key(key)
-    canonical = canonical_team_display(canon, sport=sport)
+    canonical = canonical_team_display(canon, raw_name=raw, sport=sport)
     lookup_keys = legacy_keys_for(canon)
 
     candidates = (

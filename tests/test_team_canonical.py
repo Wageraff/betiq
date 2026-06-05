@@ -113,6 +113,45 @@ class TeamCanonicalTests(unittest.TestCase):
         self.assertEqual(canonical_team_key("Бразилия (жен.)"), "brazilwomen")
         self.assertEqual(canonical_team_key("Republicii Dominicane (F)"), "dominicanwomen")
 
+    def test_glued_name_same_key(self) -> None:
+        self.assertEqual(
+            canonical_team_key("Felix Auger-Aliassime"),
+            canonical_team_key("felixaugeraliassime"),
+        )
+
+    def test_youth_teams(self) -> None:
+        self.assertEqual(canonical_team_key("Ирак (23)"), "iraq23")
+        self.assertEqual(canonical_team_key("Irak (23)"), "iraq23")
+        self.assertEqual(canonical_team_key("Казахстан (19)"), "kazakhstan19")
+        self.assertEqual(canonical_team_display("iraq23"), "Iraq (23)")
+
+    def test_women_display_catalog(self) -> None:
+        self.assertEqual(canonical_team_display("belgiumwomen"), "Belgium (W)")
+        self.assertEqual(canonical_team_key("Бельгия (жен)"), "belgiumwomen")
+
+    def test_knicks_and_spurs(self) -> None:
+        self.assertEqual(canonical_team_key("Нью-Йорк Никс"), "knicksnewyork")
+        self.assertEqual(canonical_team_display("knicksnewyork"), "New York Knicks")
+        self.assertEqual(canonical_team_key("Сан-Антонио"), "antoniosanspurs")
+
+    def test_get_or_create_display_from_raw(self) -> None:
+        from src.scraper.utils.team_names import canonical_team_display
+
+        key = canonical_team_key("Алехандро Моро Каньяс")
+        display = canonical_team_display(key, raw_name="Алехандро Моро Каньяс", sport="tennis")
+        self.assertEqual(display, "Alejandro Moro Cañas")
+        self.assertNotIn("Alehandro", display)
+
+    def test_canonical_key_from_names_merges_glued(self) -> None:
+        from src.scraper.utils.team_names import canonical_key_from_names
+
+        key = canonical_key_from_names(
+            "felixaugeraliassime",
+            "Felix Auger-Aliassime",
+            "Felix Auger Aliassime",
+        )
+        self.assertEqual(key, "aliassimeaugerfelix")
+
 
 if __name__ == "__main__":
     unittest.main()
