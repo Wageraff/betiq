@@ -65,7 +65,7 @@ async def _rebuild_all_teams(
     labels_by_id, sports_by_id = _match_team_context(matches)
     fixed = 0
 
-    async with session.no_autoflush:
+    with session.no_autoflush:
         for team in await session.scalars(select(Team)):
             candidates: list[str] = []
             if team.normalized_key:
