@@ -149,7 +149,19 @@ COUNTRY_CATALOG: tuple[CatalogEntry, ...] = (
     _e("indianafever", "Indiana Fever", "Indiana Fiver"),
     _e("atlantadream", "Atlanta Dream", "Atlanta Drim"),
     _e("knicksnewyork", "New York Knicks", "New York Knicks"),
-    _e("antoniosanspurs", "San Antonio Spurs", "San Antonio Spurs"),
+    _e(
+        "antoniosanspurs",
+        "San Antonio Spurs",
+        "San Antonio Spurs",
+        "Сан-Антонио Сперз",
+        "Сан Антонио Сперз",
+    ),
+    _e(
+        "clubmontevideoracing",
+        "Racing Club Montevideo",
+        "Racing Club Montevideo",
+        "Расинг Клуб Монтевидео",
+    ),
 )
 # fmt: on
 
@@ -204,6 +216,10 @@ EXTRA_ALIASES: dict[str, str] = {
     "majachwalinska": "chwalinskamaja",
     "kostyukm": "kostyukmarta",
     "andreevam": "andreevamirra",
+    "sanantoniosperz": "antoniosanspurs",
+    "rebekamasarova": "masarovarebeka",
+    "rasingklubmontevideo": "clubmontevideoracing",
+    "racingclubmontevideo": "clubmontevideoracing",
 }
 
 # Игроки: canonical key → EN display (не сборные)
@@ -216,6 +232,7 @@ PERSON_CATALOG: tuple[CatalogEntry, ...] = (
     _e("chwalinskamaja", "Maja Chwalinska", "Maja Chwalinska", "Хвалинска М.", "Chwalinska M."),
     _e("kostyukmarta", "Marta Kostyuk", "Kostyuk M."),
     _e("andreevamirra", "Mirra Andreeva", "Andreeva M."),
+    _e("masarovarebeka", "Rebeka Masarova", "Rebeka Masarova", "Ребека Масарова"),
 )
 
 ALL_CATALOG: tuple[CatalogEntry, ...] = COUNTRY_CATALOG + PERSON_CATALOG

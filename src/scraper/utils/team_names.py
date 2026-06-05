@@ -70,21 +70,46 @@ def _transliterate_cyrillic(text: str) -> str:
     return "".join(out)
 
 
-def _mechanical_key(name: str) -> str:
-    """Любой алфавит → латинский ключ (без алиасов)."""
+def latinize_name(name: str) -> str:
+    """Любой алфавит → латиница с пробелами (для display и токенов)."""
     name = unicodedata.normalize("NFD", name)
     name = "".join(c for c in name if unicodedata.category(c) != "Mn")
     name = name.translate(_LATIN_FOLD)
     name = _transliterate_cyrillic(name)
     name = _transliterate_arabic(name)
-    name = name.lower()
+    name = name.replace("—", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", name).strip()
+
+
+def _mechanical_key(name: str) -> str:
+    """Любой алфавит → латинский ключ (без алиасов)."""
+    name = latinize_name(name).lower()
     name = CLUB_PREFIXES.sub("", name)
     name = re.sub(r"[^a-z0-9]", "", name)
     return name.strip()
 
 
+def _has_non_latin(text: str) -> bool:
+    for ch in text:
+        if "\u0400" <= ch <= "\u04ff" or "\u0500" <= ch <= "\u052f":
+            return True
+        if "\u0600" <= ch <= "\u06ff" or "\u0750" <= ch <= "\u077f":
+            return True
+    return False
+
+
+def _token_key(raw: str) -> str:
+    """Игроки/клубы: sorted tokens из латинизированного raw (RU/EN → один ключ)."""
+    latin = latinize_name(raw).lower()
+    tokens = re.findall(r"[a-z]{2,}", latin)
+    tokens = [t for t in tokens if len(t) > 1]
+    if len(tokens) >= 2:
+        return "".join(sorted(tokens))
+    return ""
+
+
 def _build_team_aliases() -> dict[str, str]:
-    """Каталог names + EXTRA → mechanical_key → canonical key."""
+    """Каталог names + EXTRA → mechanical / token key → canonical key."""
     out = dict(EXTRA_ALIASES)
     for entry in ALL_CATALOG:
         out[entry.key] = entry.key
@@ -92,10 +117,23 @@ def _build_team_aliases() -> dict[str, str]:
             mk = _mechanical_key(name)
             if mk:
                 out[mk] = entry.key
+            tk = _token_key(name)
+            if tk:
+                out[tk] = entry.key
     return out
 
 
-TEAM_ALIASES: dict[str, str] = _build_team_aliases()
+TEAM_ALIASES: dict[str, str] = {}
+
+
+def _refresh_team_aliases() -> None:
+    global TEAM_ALIASES, _COUNTRY_KEYS
+    TEAM_ALIASES = _build_team_aliases()
+    _COUNTRY_KEYS = set(_CANONICAL_DISPLAY) | set(TEAM_ALIASES.values())
+
+
+_refresh_team_aliases()
+_COUNTRY_KEYS: set[str] = set(_CANONICAL_DISPLAY) | set(TEAM_ALIASES.values())
 
 
 def resolve_team_key(key: str) -> str:
@@ -104,9 +142,6 @@ def resolve_team_key(key: str) -> str:
     if not k:
         return ""
     return TEAM_ALIASES.get(k, k)
-
-
-_COUNTRY_KEYS: set[str] = set(_CANONICAL_DISPLAY) | set(TEAM_ALIASES.values())
 
 
 def is_catalog_key(key: str) -> bool:
@@ -139,7 +174,10 @@ def pick_best_display_raw(candidates: list[str], normalized_key: str) -> str:
             valid.append(n)
     if not valid:
         return ""
-    valid.sort(key=lambda n: (" " in n, "-" in n, len(n)), reverse=True)
+    valid.sort(
+        key=lambda n: (not _has_non_latin(n), " " in n, "-" in n, len(n)),
+        reverse=True,
+    )
     return valid[0]
 
 
@@ -153,22 +191,18 @@ def legacy_keys_for(canonical_key: str) -> list[str]:
 
 
 def _person_canonical(mechanical: str, raw: str) -> str:
-    """Теннисисты: sorted tokens + алиасы."""
+    """Игроки и многословные клубы: sorted tokens + алиасы."""
     if mechanical in _COUNTRY_KEYS or len(mechanical) < 8:
         return mechanical
     if mechanical in TEAM_ALIASES:
         return resolve_team_key(mechanical)
 
-    tokens = re.findall(r"[a-z]{2,}", raw.lower().replace("—", " "))
-    tokens = [_transliterate_cyrillic(t) for t in tokens]
-    tokens = [_transliterate_arabic(t) for t in tokens]
-    tokens = [re.sub(r"[^a-z]", "", t) for t in tokens if t]
-    tokens = [t for t in tokens if len(t) > 1]
+    token_key = _token_key(raw)
+    if token_key:
+        return resolve_team_key(token_key)
 
-    if len(tokens) >= 2:
-        sorted_key = "".join(sorted(tokens))
-        return resolve_team_key(sorted_key)
-
+    latin = latinize_name(raw).lower()
+    tokens = re.findall(r"[a-z]{2,}", latin)
     if len(tokens) == 1 and len(mechanical) > len(tokens[0]):
         suffix = mechanical[len(tokens[0]) :]
         if len(suffix) == 1:
@@ -233,13 +267,25 @@ def normalize_team_name(name: str) -> str:
     return canonical_team_key(name)
 
 
+def _display_from_raw(key: str, raw: str, *, sport: str | None) -> str:
+    """EN display из raw: латиница + Title Case, не кириллица и не склейка ключа."""
+    latin = latinize_name(raw)
+    if not latin:
+        return key.title()
+    if sport == "tennis" or is_likely_person_key(key):
+        return format_person_display(latin)
+    if " " in latin:
+        return format_person_display(latin)
+    return format_person_display(latin)
+
+
 def canonical_team_display(
     normalized_key: str,
     *,
     raw_name: str | None = None,
     sport: str | None = None,
 ) -> str:
-    """Справочник и матчи: каталог → EN; игроки → латиница с пробелами."""
+    """Справочник и матчи: каталог → EN; иначе латиница с пробелами."""
     key = resolve_team_key(normalized_key)
     if not key:
         return ""
@@ -248,10 +294,8 @@ def canonical_team_display(
         return _CANONICAL_DISPLAY[key]
 
     raw = (raw_name or "").strip()
-    if sport == "tennis" or is_likely_person_key(key):
-        if raw and canonical_team_key(raw) == key:
-            return format_person_display(raw)
-        return format_person_display(raw) if raw else key.title()
+    if raw and canonical_team_key(raw) == key:
+        return _display_from_raw(key, raw, sport=sport)
     return key.title()
 
 
@@ -288,6 +332,11 @@ def is_catalog_display_name(
         return False
     if key in _CANONICAL_DISPLAY:
         return display != _CANONICAL_DISPLAY[key]
+    if _has_non_latin(display):
+        return True
+    compact = display.lower().replace(" ", "")
+    if compact == key or display == key.title():
+        return True
     if (sport == "tennis" or is_likely_person_key(key)) and " " not in display:
         return True
     target = canonical_team_display(key, raw_name=display, sport=sport)

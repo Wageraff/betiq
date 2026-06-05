@@ -53,6 +53,31 @@ class TeamCanonicalTests(unittest.TestCase):
             canonical_team_key("Арнальди М."),
         )
 
+    def test_cyrillic_clubs_and_players(self) -> None:
+        from src.scraper.utils.team_names import canonical_team_display
+
+        self.assertEqual(
+            canonical_team_key("Ребека Масарова"),
+            canonical_team_key("Rebeka Masarova"),
+        )
+        self.assertEqual(canonical_team_display("masarovarebeka"), "Rebeka Masarova")
+        self.assertEqual(
+            canonical_team_key("Сан-Антонио Сперз"),
+            canonical_team_key("San Antonio Spurs"),
+        )
+        self.assertEqual(
+            canonical_team_display("antoniosanspurs"),
+            "San Antonio Spurs",
+        )
+        self.assertEqual(
+            canonical_team_key("Расинг Клуб Монтевидео"),
+            canonical_team_key("Racing Club Montevideo"),
+        )
+        self.assertEqual(
+            canonical_team_display("clubmontevideoracing"),
+            "Racing Club Montevideo",
+        )
+
     def test_arabic_catalog(self) -> None:
         self.assertEqual(canonical_team_key("إنجلترا"), "england")
         self.assertEqual(canonical_team_key("فرنسا"), "france")
