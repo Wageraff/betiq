@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, MatchBrief } from "../api";
 
+const DATE_LOCALE = "en-US";
+
 export default function MatchesPage() {
   const [items, setItems] = useState<MatchBrief[]>([]);
   const [total, setTotal] = useState(0);
@@ -38,15 +40,15 @@ export default function MatchesPage() {
 
   return (
     <>
-      <h2>Матчи</h2>
+      <h2>Matches</h2>
       <div className="filters panel">
         <input
-          placeholder="Поиск по командам"
+          placeholder="Search teams"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
         <select value={sport} onChange={(e) => setSport(e.target.value)}>
-          <option value="">Все виды спорта</option>
+          <option value="">All sports</option>
           <option value="football">football</option>
           <option value="tennis">tennis</option>
           <option value="volleyball">volleyball</option>
@@ -54,25 +56,25 @@ export default function MatchesPage() {
           <option value="basketball">basketball</option>
         </select>
         <select value={hasAi} onChange={(e) => setHasAi(e.target.value)}>
-          <option value="">AI: все</option>
-          <option value="true">С AI</option>
-          <option value="false">Без AI</option>
+          <option value="">AI: all</option>
+          <option value="true">With AI</option>
+          <option value="false">Without AI</option>
         </select>
         <button onClick={load} disabled={loading}>
-          Применить
+          Apply
         </button>
       </div>
       {error && <p className="error">{error}</p>}
-      <p style={{ color: "var(--muted)" }}>Всего: {total}</p>
+      <p style={{ color: "var(--muted)" }}>Total: {total}</p>
       <div className="panel" style={{ overflowX: "auto" }}>
         <table>
           <thead>
             <tr>
               <th>ID</th>
-              <th>Матч</th>
-              <th>Спорт</th>
-              <th>Дата (UTC)</th>
-              <th>Прогнозов</th>
+              <th>Match</th>
+              <th>Sport</th>
+              <th>Date (UTC)</th>
+              <th>Predictions</th>
               <th>AI</th>
             </tr>
           </thead>
@@ -90,15 +92,15 @@ export default function MatchesPage() {
                 <td>{m.sport || "—"}</td>
                 <td>
                   {m.match_date
-                    ? new Date(m.match_date).toLocaleString("ru-RU")
+                    ? new Date(m.match_date).toLocaleString(DATE_LOCALE)
                     : "—"}
                 </td>
                 <td>{m.predictions_count}</td>
                 <td>
                   {m.has_ai ? (
-                    <span className="badge ok">да</span>
+                    <span className="badge ok">yes</span>
                   ) : (
-                    <span className="badge">нет</span>
+                    <span className="badge">no</span>
                   )}
                 </td>
               </tr>
@@ -107,7 +109,7 @@ export default function MatchesPage() {
         </table>
       </div>
       <p>
-        <Link to="/ai">→ Раздел AI</Link> для перегенерации сводок
+        <Link to="/ai">→ AI section</Link> to regenerate summaries
       </p>
     </>
   );

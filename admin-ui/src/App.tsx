@@ -52,10 +52,10 @@ function Nav() {
   return (
     <nav>
       <Link to="/" className={cls("/")}>
-        Матчи
+        Matches
       </Link>
       <Link to="/teams" className={cls("/teams")}>
-        Команды
+        Teams
       </Link>
       <Link to="/ai" className={cls("/ai")}>
         AI

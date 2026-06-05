@@ -9,18 +9,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models import Match, Team
 from src.scraper.utils.team_names import (
     canonical_team_display,
+    canonical_team_key,
     merge_alias_text,
-    normalize_team_name,
     resolve_team_key,
 )
 
 
 def _canonical_for_team(team: Team) -> str:
-    from_display = normalize_team_name(team.display_name) if team.display_name else ""
-    from_key = resolve_team_key(team.normalized_key)
-    if from_display:
-        return resolve_team_key(from_display)
-    return from_key
+    """Один ключ для RU/RO/EN вариантов (display, key, aliases)."""
+    candidates: list[str] = []
+    if team.normalized_key:
+        candidates.append(team.normalized_key)
+    if team.display_name:
+        candidates.append(team.display_name)
+    if team.aliases:
+        candidates.extend(p.strip() for p in team.aliases.split(",") if p.strip())
+    keys = {
+        resolve_team_key(canonical_team_key(c))
+        for c in candidates
+        if c
+    }
+    keys.discard("")
+    if len(keys) == 1:
+        return keys.pop()
+    if team.display_name:
+        return resolve_team_key(canonical_team_key(team.display_name))
+    return resolve_team_key(team.normalized_key)
 
 
 def find_duplicate_groups(teams: list[Team]) -> list[tuple[str, list[Team]]]:

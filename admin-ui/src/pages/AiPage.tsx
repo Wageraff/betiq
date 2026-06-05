@@ -61,9 +61,9 @@ export default function AiPage() {
 
   return (
     <>
-      <h2>AI-сводки</h2>
+      <h2>AI summaries</h2>
       <p style={{ color: "var(--muted)" }}>
-        Матчи с 2+ прогнозами. Шаблон промпта — в разделе «Настройки».
+        Matches with 2+ predictions. Prompt template is in Settings.
       </p>
       {error && <p className="error">{error}</p>}
       <div className="panel">
@@ -71,8 +71,8 @@ export default function AiPage() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>Матч</th>
-              <th>Прогнозов</th>
+              <th>Match</th>
+              <th>Predictions</th>
               <th>AI</th>
               <th></th>
             </tr>
@@ -87,11 +87,11 @@ export default function AiPage() {
                   {r.has_ai ? (
                     <span className="badge ok">{r.ai_confidence || "ok"}</span>
                   ) : (
-                    <span className="badge">нет</span>
+                    <span className="badge">no</span>
                   )}
                 </td>
                 <td>
-                  <button onClick={() => runAi(r.id)}>Сгенерировать</button>
+                  <button onClick={() => runAi(r.id)}>Generate</button>
                 </td>
               </tr>
             ))}
@@ -100,7 +100,7 @@ export default function AiPage() {
       </div>
       {jobId && (
         <div className="panel">
-          <h3>Лог задачи {jobId}</h3>
+          <h3>Job log {jobId}</h3>
           <div className="log-box">{log.join("\n")}</div>
         </div>
       )}

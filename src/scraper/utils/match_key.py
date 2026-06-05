@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models import Match
 from src.db.teams import get_or_create_team
 from src.scraper.utils.match_key_build import build_match_key, build_slug
-from src.scraper.utils.team_names import canonical_team_key, normalize_team_name
+from src.scraper.utils.team_names import (
+    canonical_team_display,
+    canonical_team_key,
+    normalize_team_name,
+)
 
 # Re-export for existing imports
 __all__ = [
@@ -21,12 +25,24 @@ __all__ = [
 ]
 
 
+def _match_team_label(raw: str, sport: str | None) -> str:
+    """Каноническое EN-имя для матча; локальное написание → teams.aliases."""
+    raw = (raw or "").strip()
+    if not raw:
+        return raw
+    key = canonical_team_key(raw)
+    if sport == "tennis":
+        return canonical_team_display(key, raw_name=raw, sport=sport) or raw
+    return canonical_team_display(key, sport=sport) or raw
+
+
 def _refresh_match_fields(match: Match, data: dict) -> None:
     """Обновить поля матча при повторном парсинге (sport, competition, команды)."""
+    sport = data.get("sport") or match.sport
     if data.get("team_home"):
-        match.team_home = data["team_home"]
+        match.team_home = _match_team_label(data["team_home"], sport)
     if data.get("team_away"):
-        match.team_away = data["team_away"]
+        match.team_away = _match_team_label(data["team_away"], sport)
     if data.get("sport"):
         match.sport = data["sport"]
     if data.get("competition") is not None:
@@ -96,10 +112,11 @@ async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
         await _link_teams(session, match, data)
         return match
 
+    sport = data.get("sport")
     match = Match(
         match_key=key,
-        team_home=data["team_home"],
-        team_away=data["team_away"],
+        team_home=_match_team_label(data["team_home"], sport),
+        team_away=_match_team_label(data["team_away"], sport),
         sport=data.get("sport"),
         competition=data.get("competition"),
         match_date=match_dt,

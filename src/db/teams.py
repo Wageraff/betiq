@@ -63,8 +63,9 @@ async def get_or_create_team(
     if not key:
         raise ValueError(f"Cannot normalize team name: {name!r}")
 
-    canonical = canonical_team_display(key, raw_name=raw, sport=sport)
-    lookup_keys = legacy_keys_for(resolve_team_key(key))
+    canon = resolve_team_key(key)
+    canonical = canonical_team_display(canon, sport=sport)
+    lookup_keys = legacy_keys_for(canon)
 
     candidates = (
         await session.scalars(select(Team).where(Team.normalized_key.in_(lookup_keys)))
@@ -81,14 +82,18 @@ async def get_or_create_team(
     if team:
         if sport and not team.sport:
             team.sport = sport
-        if raw and raw != canonical:
+        if raw and raw.lower() != canonical.lower():
             team.aliases = merge_alias_text(team.aliases, raw)
-        if is_catalog_display_name(team.display_name, key, sport=sport or team.sport):
+        if team.display_name != canonical:
+            if team.display_name and team.display_name != canonical:
+                team.aliases = merge_alias_text(team.aliases, team.display_name)
             team.display_name = canonical
+        if team.normalized_key != canon:
+            team.normalized_key = canon
         return team
 
     team = Team(
-        normalized_key=key,
+        normalized_key=canon,
         display_name=canonical,
         sport=sport,
         aliases=merge_alias_text(None, raw) if raw and raw != canonical else None,

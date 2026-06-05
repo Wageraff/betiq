@@ -11,7 +11,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.scraper.utils.match_key_build import build_match_key
-from src.scraper.utils.team_names import canonical_team_key
+from src.scraper.utils.team_names import canonical_team_display, canonical_team_key
 
 
 class TeamCanonicalTests(unittest.TestCase):
@@ -52,6 +52,33 @@ class TeamCanonicalTests(unittest.TestCase):
             canonical_team_key("Matteo Arnaldi"),
             canonical_team_key("Арнальди М."),
         )
+
+    def test_arabic_catalog(self) -> None:
+        self.assertEqual(canonical_team_key("إنجلترا"), "england")
+        self.assertEqual(canonical_team_key("فرنسا"), "france")
+        self.assertEqual(canonical_team_display("england"), "England")
+
+    def test_england_new_zealand_ru_ro(self) -> None:
+        for name, key in (
+            ("Англия", "england"),
+            ("Anglia", "england"),
+            ("Новая Зеландия", "newzealand"),
+            ("Noua Zeelanda", "newzealand"),
+            ("Австралия", "australia"),
+            ("Швейцария", "switzerland"),
+            ("США", "usa"),
+            ("SUA", "usa"),
+            ("Германия", "germany"),
+            ("Армения", "armenia"),
+            ("Казахстан", "kazakhstan"),
+        ):
+            self.assertEqual(canonical_team_key(name), key, msg=name)
+
+    def test_same_match_key_england_nz(self) -> None:
+        day = date(2026, 6, 6)
+        k1 = build_match_key("Англия", "Новая Зеландия", day)
+        k2 = build_match_key("Anglia", "Noua Zeelanda", day)
+        self.assertEqual(k1, k2)
 
     def test_women_volleyball_brazil_dominican(self) -> None:
         day = date(2026, 6, 5)

@@ -38,7 +38,7 @@ export default function TeamsPage() {
       setDupGroups([]);
       setDupError(
         String(e).includes("404")
-          ? "Эндпоинт /teams/duplicates не найден — сделайте git pull и restart betiq-api"
+          ? "Endpoint /teams/duplicates not found — run git pull and restart betiq-api"
           : String(e)
       );
     }
@@ -90,7 +90,7 @@ export default function TeamsPage() {
         sport: sport || null,
         aliases: aliases || null,
       });
-      setMsg("Сохранено");
+      setMsg("Saved");
       setSelected(updated);
       load();
     } catch (e) {
@@ -103,7 +103,7 @@ export default function TeamsPage() {
     try {
       const updated = await api.uploadLogo(selected.id, e.target.files[0]);
       setSelected(updated);
-      setMsg("Логотип загружен");
+      setMsg("Logo uploaded");
       load();
     } catch (err) {
       setError(String(err));
@@ -174,20 +174,20 @@ export default function TeamsPage() {
 
   return (
     <>
-      <h2>Справочник команд / соперников</h2>
+      <h2>Teams catalog</h2>
       <p style={{ color: "var(--muted)" }}>
-        Справочник на английском (ключи как в match_key). Варианты с сайтов — в алиасах.
+        English display names and keys (match_key). Local spellings from sources go in aliases.
       </p>
 
       <section className="panel dup-groups">
         <div className="dup-groups-head">
-          <h3>Объединение дубликатов</h3>
+          <h3>Merge duplicates</h3>
           <button
             className="secondary"
             disabled={merging}
             onClick={mergeAllAuto}
           >
-            Сканировать и объединить все
+            Scan and merge all
           </button>
         </div>
 
@@ -195,9 +195,9 @@ export default function TeamsPage() {
 
         {!dupError && dupGroups.length === 0 && (
           <p style={{ color: "var(--muted)", marginBottom: "1rem" }}>
-            Автоматически похожих пар не найдено (один ключ на команду). Если в таблице
-            всё ещё видите «Franta» и «France» — отметьте их вручную ниже или нажмите
-            «Сканировать и объединить все».
+            No duplicate groups found automatically. If you still see pairs like
+            &quot;Franta&quot; and &quot;France&quot;, select them manually below or
+            click &quot;Scan and merge all&quot;.
           </p>
         )}
 
@@ -231,19 +231,19 @@ export default function TeamsPage() {
               ))}
             </ul>
             <button disabled={merging} onClick={() => mergeGroup(g)}>
-              Объединить группу
+              Merge group
             </button>
           </div>
         ))}
 
         <div className="dup-manual" style={{ marginTop: "1rem" }}>
-          <h4 style={{ margin: "0 0 0.5rem" }}>Ручное объединение</h4>
+          <h4 style={{ margin: "0 0 0.5rem" }}>Manual merge</h4>
           <p style={{ color: "var(--muted)", fontSize: "0.9rem", margin: "0 0 0.75rem" }}>
-            В таблице ниже включите колонку «Слить» у 2+ команд одной сущности.
+            Check &quot;Merge&quot; for 2+ teams that are the same entity.
           </p>
           {mergeIds.length >= 2 ? (
             <>
-              <p>Выбрано: {mergeIds.length}</p>
+              <p>Selected: {mergeIds.length}</p>
               <ul style={{ listStyle: "none", padding: 0 }}>
                 {mergeTeamsForManual.map((t) => (
                   <li key={t.id} style={{ marginBottom: 4 }}>
@@ -254,28 +254,28 @@ export default function TeamsPage() {
                         checked={manualKeeperId === t.id}
                         onChange={() => setManualKeeperId(t.id)}
                       />
-                      Оставить #{t.id} {t.display_name} ({t.normalized_key})
+                      Keep #{t.id} {t.display_name} ({t.normalized_key})
                     </label>
                   </li>
                 ))}
               </ul>
               <button disabled={merging || !manualKeeperId} onClick={mergeManual}>
-                Объединить выбранные
+                Merge selected
               </button>
             </>
           ) : (
-            <p style={{ color: "var(--muted)" }}>Отметьте минимум две команды в таблице.</p>
+            <p style={{ color: "var(--muted)" }}>Select at least two teams in the table.</p>
           )}
         </div>
       </section>
 
       <div className="filters panel">
         <input
-          placeholder="Поиск"
+          placeholder="Search"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <button onClick={load}>Найти</button>
+        <button onClick={load}>Search</button>
       </div>
       {error && <p className="error">{error}</p>}
       {msg && <p style={{ color: "var(--ok)" }}>{msg}</p>}
@@ -285,10 +285,10 @@ export default function TeamsPage() {
           <table>
             <thead>
               <tr>
-                <th title="Для ручного слияния">Слить</th>
+                <th title="For manual merge">Merge</th>
                 <th></th>
-                <th>Название (EN)</th>
-                <th>Ключ (normalized)</th>
+                <th>Name (EN)</th>
+                <th>Key (normalized)</th>
               </tr>
             </thead>
             <tbody>
@@ -329,7 +329,7 @@ export default function TeamsPage() {
         <div className="panel">
           {selected ? (
             <>
-              <h3>Редактирование #{selected.id}</h3>
+              <h3>Edit #{selected.id}</h3>
               {selected.logo_url && (
                 <img
                   src={selected.logo_url}
@@ -339,7 +339,7 @@ export default function TeamsPage() {
                 />
               )}
               <label style={{ display: "block", marginBottom: "0.5rem" }}>
-                Название (англ., для справочника)
+                Display name (English)
                 <input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
@@ -347,7 +347,7 @@ export default function TeamsPage() {
                 />
               </label>
               <label style={{ display: "block", marginBottom: "0.5rem" }}>
-                Спорт
+                Sport
                 <input
                   value={sport}
                   onChange={(e) => setSport(e.target.value)}
@@ -355,7 +355,7 @@ export default function TeamsPage() {
                 />
               </label>
               <label style={{ display: "block", marginBottom: "0.5rem" }}>
-                Алиасы (RO/RU/другие написания с сайтов)
+                Aliases (local spellings from sources)
                 <textarea
                   value={aliases}
                   onChange={(e) => setAliases(e.target.value)}
@@ -364,13 +364,13 @@ export default function TeamsPage() {
                 />
               </label>
               <label style={{ display: "block", marginBottom: "1rem" }}>
-                Логотип (png/jpg/webp)
+                Logo (png/jpg/webp)
                 <input type="file" accept="image/*" onChange={onLogo} />
               </label>
-              <button onClick={save}>Сохранить</button>
+              <button onClick={save}>Save</button>
             </>
           ) : (
-            <p style={{ color: "var(--muted)" }}>Выберите команду в таблице</p>
+            <p style={{ color: "var(--muted)" }}>Select a team in the table</p>
           )}
         </div>
       </div>

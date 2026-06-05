@@ -9,6 +9,7 @@ from src.db.models import Match, Team
 from src.db.session import async_session_factory
 from src.db.team_dedupe import dedupe_teams
 from src.db.teams import get_or_create_team, refresh_team_display_from_matches
+from src.scraper.utils.match_key import _match_team_label
 from src.scraper.utils.team_names import (
     canonical_team_display,
     is_catalog_display_name,
@@ -17,6 +18,24 @@ from src.scraper.utils.team_names import (
     pick_best_display_raw,
     resolve_team_key,
 )
+
+
+async def _fix_match_labels(session: AsyncSession) -> int:
+    """team_home/team_away в матчах — канонические EN-имена."""
+    n = 0
+    for m in await session.scalars(select(Match)):
+        sport = m.sport
+        if m.team_home:
+            label = _match_team_label(m.team_home, sport)
+            if label and label != m.team_home:
+                m.team_home = label
+                n += 1
+        if m.team_away:
+            label = _match_team_label(m.team_away, sport)
+            if label and label != m.team_away:
+                m.team_away = label
+                n += 1
+    return n
 
 
 async def _fix_team_displays(session: AsyncSession) -> int:
@@ -77,12 +96,14 @@ async def run_repair_catalog(*, dry_run: bool = False) -> dict[str, int]:
                     await get_or_create_team(session, m.team_away, sport=m.sport)
                 ).id
 
+        labels_fixed = await _fix_match_labels(session)
         fixed = await _fix_team_displays(session)
         matches_merged = await dedupe_matches(session, dry_run=False)
         await session.commit()
 
         return {
             "teams_removed": teams_removed,
+            "match_labels_fixed": labels_fixed,
             "display_fixes": fixed,
             "matches_merged": matches_merged,
         }

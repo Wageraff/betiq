@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, MatchDetail, PredictionDetail } from "../api";
 
+const DATE_LOCALE = "en-US";
+
 function PredictionCard({ p }: { p: PredictionDetail }) {
   const isHtml = Boolean(p.full_text && /<[a-z][\s\S]*>/i.test(p.full_text));
 
@@ -15,7 +17,7 @@ function PredictionCard({ p }: { p: PredictionDetail }) {
           )}
         </div>
         <a href={p.source_url} target="_blank" rel="noreferrer">
-          Открыть на сайте
+          Open source
         </a>
       </header>
       {p.title && <h4 style={{ margin: "0.5rem 0" }}>{p.title}</h4>}
@@ -42,11 +44,11 @@ function PredictionCard({ p }: { p: PredictionDetail }) {
           <pre className="prediction-text">{p.full_text}</pre>
         )
       ) : (
-        <p style={{ color: "var(--muted)" }}>Текст прогноза не сохранён</p>
+        <p style={{ color: "var(--muted)" }}>Prediction text not saved</p>
       )}
       <footer style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: 8 }}>
         {p.scraped_at
-          ? `Скрап: ${new Date(p.scraped_at).toLocaleString("ru-RU")}`
+          ? `Scraped: ${new Date(p.scraped_at).toLocaleString(DATE_LOCALE)}`
           : null}
         {" · "}
         {p.language}
@@ -72,7 +74,7 @@ export default function MatchDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  if (loading) return <p style={{ color: "var(--muted)" }}>Загрузка…</p>;
+  if (loading) return <p style={{ color: "var(--muted)" }}>Loading…</p>;
   if (error) return <p className="error">{error}</p>;
   if (!data) return null;
 
@@ -81,7 +83,7 @@ export default function MatchDetailPage() {
   return (
     <>
       <p>
-        <Link to="/">← Матчи</Link>
+        <Link to="/">← Matches</Link>
       </p>
       <h2>
         {m.team_home} — {m.team_away}
@@ -91,9 +93,11 @@ export default function MatchDetailPage() {
         {m.sport && <span>{m.sport}</span>}
         {m.competition && <span>{m.competition}</span>}
         {m.match_date && (
-          <span>{new Date(m.match_date).toLocaleString("ru-RU")} UTC</span>
+          <span>{new Date(m.match_date).toLocaleString(DATE_LOCALE)} UTC</span>
         )}
-        <span>{m.predictions_count} прогноз(ов)</span>
+        <span>
+          {m.predictions_count} prediction{m.predictions_count === 1 ? "" : "s"}
+        </span>
         {m.match_key && (
           <code style={{ fontSize: "0.75rem" }}>{m.match_key}</code>
         )}
@@ -101,10 +105,10 @@ export default function MatchDetailPage() {
 
       {data.ai_summary && (
         <section className="panel">
-          <h3>AI-сводка</h3>
+          <h3>AI summary</h3>
           {data.ai_top_pick && (
             <p>
-              <strong>Топ:</strong> {data.ai_top_pick}
+              <strong>Top pick:</strong> {data.ai_top_pick}
               {data.ai_confidence && ` (${data.ai_confidence})`}
             </p>
           )}
@@ -115,15 +119,15 @@ export default function MatchDetailPage() {
             <p style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
               {data.ai_model}
               {data.ai_generated_at &&
-                ` · ${new Date(data.ai_generated_at).toLocaleString("ru-RU")}`}
+                ` · ${new Date(data.ai_generated_at).toLocaleString(DATE_LOCALE)}`}
             </p>
           )}
         </section>
       )}
 
-      <h3>Прогнозы по источникам</h3>
+      <h3>Predictions by source</h3>
       {data.predictions.length === 0 ? (
-        <p style={{ color: "var(--muted)" }}>Нет прогнозов</p>
+        <p style={{ color: "var(--muted)" }}>No predictions</p>
       ) : (
         data.predictions.map((p) => <PredictionCard key={p.id} p={p} />)
       )}

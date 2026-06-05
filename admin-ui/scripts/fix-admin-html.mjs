@@ -14,7 +14,7 @@ const script = m[0];
 html = html.replace(script, "");
 html = html.replace(
   '<div id="root"></div>',
-  '<div id="root"><p style="padding:2rem;color:#8b9bb4;font-family:system-ui,sans-serif">Загрузка…</p></div>',
+  '<div id="root"><p style="padding:2rem;color:#8b9bb4;font-family:system-ui,sans-serif">Loading…</p></div>',
 );
 
 const bodyClose = html.lastIndexOf("</body>");

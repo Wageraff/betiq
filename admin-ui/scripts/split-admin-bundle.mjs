@@ -43,7 +43,7 @@ const loader = `<script>
     el.textContent = code;
     document.body.appendChild(el);
   } catch (e) {
-    root.innerHTML = '<p style="padding:2rem;color:#f87171">Ошибка загрузки: ' + e + '</p>';
+    root.innerHTML = '<p style="padding:2rem;color:#f87171">Load error: ' + e + '</p>';
   }
 })();
 </script>`;
@@ -51,7 +51,7 @@ const loader = `<script>
 html = html.replace(/<script>[\s\S]*?<\/script>/, loader);
 html = html.replace(
   '<div id="root"></div>',
-  '<div id="root"><p style="padding:2rem;color:#8b9bb4;font-family:system-ui,sans-serif">Загрузка…</p></div>',
+  '<div id="root"><p style="padding:2rem;color:#8b9bb4;font-family:system-ui,sans-serif">Loading…</p></div>',
 );
 
 writeFileSync(indexPath, html);

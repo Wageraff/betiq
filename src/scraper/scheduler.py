@@ -44,10 +44,19 @@ def _verify_proxy_pool() -> None:
 _JOB_KW = {"max_instances": 1, "coalesce": True}
 
 
+async def job_repair_catalog() -> None:
+    from src.db.repair_catalog import run_repair_catalog
+
+    log.info("Scheduled: repair catalog (teams + matches)")
+    stats = await run_repair_catalog()
+    log.info("repair_catalog done: %s", stats)
+
+
 async def job_full_scrape() -> None:
     limit = settings.scrape_full_limit
     log.info("Scheduled: full scrape (limit=%s)", limit)
     await run_scrape(limit=limit)
+    await job_repair_catalog()
 
 
 async def job_quick_scrape() -> None:
@@ -98,6 +107,13 @@ def main() -> None:
         job_health_check,
         CronTrigger.from_crontab("0 8 * * *"),
         id="health_check",
+        replace_existing=True,
+        **_JOB_KW,
+    )
+    scheduler.add_job(
+        job_repair_catalog,
+        CronTrigger.from_crontab("30 3 * * *"),
+        id="repair_catalog",
         replace_existing=True,
         **_JOB_KW,
     )
