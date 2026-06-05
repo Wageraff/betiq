@@ -52,31 +52,49 @@ def _admin_index() -> Path:
     return index
 
 
-def _serve_admin_index(request: Request) -> Response:
-    """Pre-gzip + Content-Length: chunked-ответ GZipMiddleware обрывается по прямому IP."""
-    index = _admin_index()
+def _serve_pre_gzip(path: Path, media_type: str, request: Request) -> Response:
     accept = request.headers.get("accept-encoding", "")
-    gz_path = Path(f"{index}.gz")
+    gz_path = Path(f"{path}.gz")
     if "gzip" in accept.lower() and gz_path.is_file():
         body = gz_path.read_bytes()
         return Response(
             content=body,
-            media_type="text/html; charset=utf-8",
+            media_type=media_type,
             headers={
                 "Content-Encoding": "gzip",
                 "Content-Length": str(len(body)),
                 "Vary": "Accept-Encoding",
+                "Cache-Control": "public, max-age=3600",
             },
         )
-    body = index.read_bytes()
+    body = path.read_bytes()
     return Response(
         content=body,
-        media_type="text/html; charset=utf-8",
-        headers={"Content-Length": str(len(body))},
+        media_type=media_type,
+        headers={
+            "Content-Length": str(len(body)),
+            "Cache-Control": "public, max-age=3600",
+        },
     )
 
 
+def _serve_admin_index(request: Request) -> Response:
+    """Pre-gzip + Content-Length: chunked-ответ GZipMiddleware обрывается по прямому IP."""
+    return _serve_pre_gzip(_admin_index(), "text/html; charset=utf-8", request)
+
+
 if _admin_dist.is_dir():
+    _admin_chunks = _admin_dist / "c"
+
+    @app.get("/admin/c/{chunk_id}.js")
+    async def admin_chunk(chunk_id: str, request: Request):
+        if not chunk_id.isdigit():
+            raise HTTPException(404)
+        path = (_admin_chunks / f"{chunk_id}.js").resolve()
+        if not str(path).startswith(str(_admin_chunks.resolve())) or not path.is_file():
+            raise HTTPException(404)
+        return _serve_pre_gzip(path, "application/javascript; charset=utf-8", request)
+
     _admin_assets = _admin_dist / "assets"
     if _admin_assets.is_dir():
 

@@ -18,6 +18,14 @@ if (existsSync(index)) {
   gzipFile(index);
 }
 
+const chunks = join(dist, "c");
+if (existsSync(chunks)) {
+  for (const name of readdirSync(chunks)) {
+    if (!name.endsWith(".js")) continue;
+    gzipFile(join(chunks, name));
+  }
+}
+
 const assets = join(dist, "assets");
 if (!existsSync(assets)) {
   process.exit(0);
