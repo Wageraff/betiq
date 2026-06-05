@@ -22,6 +22,7 @@ def _read_config() -> configparser.ConfigParser:
 
 _cfg = _read_config()
 _scraper = _cfg["scraper"] if _cfg.has_section("scraper") else {}
+_proxy_sessions = _cfg["proxy_sessions"] if _cfg.has_section("proxy_sessions") else {}
 _datetime = _cfg["datetime"] if _cfg.has_section("datetime") else {}
 _logging = _cfg["logging"] if _cfg.has_section("logging") else {}
 _ai = _cfg["ai"] if _cfg.has_section("ai") else {}
@@ -76,6 +77,9 @@ class Settings(BaseSettings):
     )
     # Если area-{geo} источника недоступен — проверяем прокси с этим geo (обычно RO)
     proxy_fallback_geo: str = _scraper.get("proxy_fallback_geo", fallback="GB")
+    # Лимиты scheduler: quick каждые 30m, full каждые 4h
+    scrape_quick_limit: int = int(_scraper.get("quick_scrape_limit", fallback=5))
+    scrape_full_limit: int = int(_scraper.get("full_scrape_limit", fallback=20))
 
     # IANA: в какой зоне на сайте показывают время матча (RO → Europe/Bucharest)
     match_datetime_source_tz: str = _datetime.get(
@@ -97,6 +101,25 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
 ]
+
+
+DEFAULT_PROXY_SESSIONS: dict[str, str] = {
+    "legalbet": "betiq001",
+    "pontulzilei": "betiq002",
+    "beturi": "betiq003",
+    "legalbet_ru": "betiq004",
+    "metaratings_ru": "betiq005",
+    "vseprosport_ru": "betiq006",
+    "stavkiprognozy_ru": "betiq007",
+    "betonmobile_ru": "betiq008",
+}
+
+
+def load_proxy_sessions() -> dict[str, str]:
+    """scraper_module → session-id (без префикса session-)."""
+    if _proxy_sessions:
+        return {k.strip(): v.strip() for k, v in _proxy_sessions.items()}
+    return dict(DEFAULT_PROXY_SESSIONS)
 
 
 def load_proxies() -> list[str]:

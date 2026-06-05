@@ -1,9 +1,22 @@
-# Smartproxy residential — один прокси на строку
-# http://BASE_USER_area-XX_session-UNIQUE_life-N:PASSWORD@proxy.smartproxy.net:3120
+# Smartproxy residential — BetIQ
+# http://USER_area-RO_session-betiqNNN_life-45:PASS@proxy.smartproxy.net:3120
 #
-# area-RO   — страна по умолчанию в файле; при парсинге подставляется sources.geo
-#            (RO → area-RO, RU → area-RU). При сбое geo источника пробуется area-GB (proxy_fallback_geo).
-# session-* — 4–12 символов, уникально на проект (betiq001, не bwb001)
-# life-*    — минуты sticky IP (1–1440)
+# Дашборд Smartproxy: НЕ включать «Different IP each time» — sticky через session+life в username.
+# Country/State/City в UI = Random (страна задаётся area-XX в username).
 #
-# Скопируйте в proxies.txt и подставьте свои username/password из дашборда Smartproxy.
+# В config.ini [proxy_sessions] каждому scraper_module свой session (betiq001…008).
+# betiq009–020 — запас при бане (ротация автоматическая).
+#
+# Проверка:
+# curl -x "http://smart-XXX_area-RU_session-betiq005_life-45:PASS@proxy.smartproxy.net:3120" https://ip.decodo.com/json
+
+http://smart-USER_area-RO_session-betiq001_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq002_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq003_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq004_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq005_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq006_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq007_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq008_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq009_life-45:PASS@proxy.smartproxy.net:3120
+http://smart-USER_area-RO_session-betiq010_life-45:PASS@proxy.smartproxy.net:3120

@@ -37,6 +37,7 @@ _browser: Optional[Browser] = None
 _proxy_pool = ProxyPool()
 
 _geo_ctx: ContextVar[Optional[str]] = ContextVar("scraper_proxy_geo", default=None)
+_source_ctx: ContextVar[Optional[str]] = ContextVar("scraper_source_module", default=None)
 
 _BLOCKED_RESOURCE_TYPES = frozenset({"image", "font", "media", "stylesheet"})
 
@@ -90,7 +91,7 @@ def is_proxy_error(exc: BaseException) -> bool:
 
 def report_proxy_failure(exc: BaseException, proxy: Optional[str]) -> None:
     if proxy and is_proxy_error(exc):
-        _proxy_pool.report_failure(proxy)
+        _proxy_pool.report_failure(proxy, source_module=_source_ctx.get())
 
 
 def get_proxy_pool() -> ProxyPool:
@@ -101,6 +102,12 @@ def _resolve_geo(geo: Optional[str]) -> Optional[str]:
     if geo:
         return geo.strip().upper()
     return _geo_ctx.get()
+
+
+def _resolve_source_module(source_module: Optional[str] = None) -> Optional[str]:
+    if source_module:
+        return source_module.strip()
+    return _source_ctx.get()
 
 
 def _browser_locale(geo: Optional[str]) -> str:
@@ -129,13 +136,18 @@ def _proxy_geo_candidates(geo: Optional[str]) -> list[Optional[str]]:
 
 
 @asynccontextmanager
-async def scrape_geo_context(geo: Optional[str]) -> AsyncIterator[None]:
-    """Задаёт geo для вложенных page_session() без явного параметра."""
-    token = _geo_ctx.set(geo.strip().upper() if geo else None)
+async def scrape_geo_context(
+    geo: Optional[str],
+    source_module: Optional[str] = None,
+) -> AsyncIterator[None]:
+    """Задаёт geo и scraper_module для page_session / proxy session (вариант B)."""
+    geo_token = _geo_ctx.set(geo.strip().upper() if geo else None)
+    src_token = _source_ctx.set(source_module.strip() if source_module else None)
     try:
         yield
     finally:
-        _geo_ctx.reset(token)
+        _geo_ctx.reset(geo_token)
+        _source_ctx.reset(src_token)
 
 
 def _is_transient_page_error(exc: BaseException) -> bool:
@@ -251,9 +263,14 @@ async def _launch_browser() -> Browser:
     return _browser
 
 
-async def new_context(geo: Optional[str] = None) -> Tuple[BrowserContext, Optional[str]]:
+async def new_context(
+    geo: Optional[str] = None,
+    *,
+    source_module: Optional[str] = None,
+) -> Tuple[BrowserContext, Optional[str]]:
     geo = _resolve_geo(geo)
-    proxy = _proxy_pool.get(geo=geo)
+    source_module = _resolve_source_module(source_module)
+    proxy = _proxy_pool.get(geo=geo, source_module=source_module)
     if settings.require_proxy and not proxy:
         raise RuntimeError("No available proxies")
 
@@ -311,10 +328,12 @@ async def page_session(
                 except Exception as e:
                     log.debug("stealth: %s", e)
 
+            src = _resolve_source_module()
             if verify_url:
                 log.info(
-                    "Checking proxy (area-%s) before scrape: %s",
+                    "Checking proxy (area-%s, source=%s) before scrape: %s",
                     attempt_geo or "?",
+                    src or "?",
                     verify_url,
                 )
                 if not await verify_proxy_access(page, verify_url):

@@ -80,7 +80,7 @@ async def check_source(session: AsyncSession, source: Source) -> HealthCheckResu
     source_geo = (source.geo or settings.proxy_fallback_geo or "GB").upper()
 
     try:
-        async with scrape_geo_context(source_geo):
+        async with scrape_geo_context(source_geo, source.scraper_module):
             async with page_session(verify_url=category_url) as (page, _proxy):
                 is_accessible = True
                 status_code = 200

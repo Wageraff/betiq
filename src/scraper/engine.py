@@ -175,7 +175,7 @@ async def scrape_source(
     category_url = snap.base_url.rstrip("/") + snap.category_url
 
     try:
-        async with scrape_geo_context(snap.geo):
+        async with scrape_geo_context(snap.geo, snap.scraper_module):
             async with page_session(verify_url=category_url) as (page, proxy):
                 used_url_cache = False
 
