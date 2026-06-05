@@ -37,7 +37,7 @@ def _match_team_context(
     return labels, sports
 
 
-async def _fix_match_labels(session: AsyncSession) -> int:
+async def _fix_match_labels(session: AsyncSession, *, dry_run: bool = False) -> int:
     """team_home/team_away в матчах — канонические EN-имена."""
     n = 0
     for m in await session.scalars(select(Match)):
@@ -45,14 +45,28 @@ async def _fix_match_labels(session: AsyncSession) -> int:
         if m.team_home:
             label = _match_team_label(m.team_home, sport)
             if label and label != m.team_home:
-                m.team_home = label
+                if not dry_run:
+                    m.team_home = label
                 n += 1
         if m.team_away:
             label = _match_team_label(m.team_away, sport)
             if label and label != m.team_away:
-                m.team_away = label
+                if not dry_run:
+                    m.team_away = label
                 n += 1
     return n
+
+
+def _resolve_key_owner(
+    new_key: str,
+    team_id: int,
+    key_owner: dict[str, int],
+) -> int | None:
+    """id команды-владельца new_key (из текущего прохода или БД)."""
+    owner_id = key_owner.get(new_key)
+    if owner_id is not None and owner_id != team_id:
+        return owner_id
+    return None
 
 
 async def _rebuild_all_teams(
@@ -63,10 +77,16 @@ async def _rebuild_all_teams(
 ) -> int:
     """Пересчитать normalized_key + display_name из матчей и алиасов."""
     labels_by_id, sports_by_id = _match_team_context(matches)
+    teams = list(await session.scalars(select(Team).order_by(Team.id)))
+    key_owner: dict[str, int] = {t.normalized_key: t.id for t in teams}
+    merged_ids: set[int] = set()
     fixed = 0
 
     with session.no_autoflush:
-        for team in await session.scalars(select(Team)):
+        for team in teams:
+            if team.id in merged_ids:
+                continue
+
             candidates: list[str] = []
             if team.normalized_key:
                 candidates.append(team.normalized_key)
@@ -95,7 +115,8 @@ async def _rebuild_all_teams(
                 new_key, raw_name=best_raw, sport=sport
             )
 
-            if team.normalized_key != new_key:
+            owner_id = _resolve_key_owner(new_key, team.id, key_owner)
+            if owner_id is None and team.normalized_key != new_key:
                 existing = await session.scalar(
                     select(Team).where(
                         Team.normalized_key == new_key,
@@ -103,39 +124,59 @@ async def _rebuild_all_teams(
                     )
                 )
                 if existing:
-                    print(
-                        f"  team merge (rebuild) id={team.id} "
-                        f"({team.normalized_key!r} / {team.display_name!r}) "
-                        f"-> id={existing.id} ({new_key!r})"
-                    )
-                    if not dry_run:
-                        await merge_team_into(session, existing, team)
-                    fixed += 1
-                    continue
+                    owner_id = existing.id
 
-            changed = False
+            if owner_id is not None:
+                print(
+                    f"  team merge (rebuild) id={team.id} "
+                    f"({team.normalized_key!r} / {team.display_name!r}) "
+                    f"-> id={owner_id} ({new_key!r})"
+                )
+                if not dry_run:
+                    keeper = await session.get(Team, owner_id)
+                    if keeper:
+                        await merge_team_into(session, keeper, team)
+                old_key = team.normalized_key
+                if key_owner.get(old_key) == team.id:
+                    key_owner.pop(old_key, None)
+                merged_ids.add(team.id)
+                fixed += 1
+                continue
+
+            changed = (
+                team.normalized_key != new_key
+                or team.display_name != new_display
+                or (sport and not team.sport)
+            )
+            if not changed:
+                continue
+
+            print(
+                f"  team fix id={team.id} key={new_key!r} display={new_display!r}"
+            )
+            fixed += 1
+
+            if dry_run:
+                if team.normalized_key != new_key:
+                    if key_owner.get(team.normalized_key) == team.id:
+                        key_owner.pop(team.normalized_key, None)
+                    key_owner[new_key] = team.id
+                continue
+
             if team.normalized_key != new_key:
+                if key_owner.get(team.normalized_key) == team.id:
+                    key_owner.pop(team.normalized_key, None)
                 team.aliases = merge_alias_text(team.aliases, team.normalized_key)
                 team.normalized_key = new_key
-                changed = True
+                key_owner[new_key] = team.id
             if team.display_name != new_display:
                 team.aliases = merge_alias_text(team.aliases, team.display_name)
                 team.display_name = new_display
-                changed = True
             if sport and not team.sport:
                 team.sport = sport
-                changed = True
             for c in candidates:
                 if c and c != new_display and c != new_key:
-                    before = team.aliases
                     team.aliases = merge_alias_text(team.aliases, c)
-                    if team.aliases != before:
-                        changed = True
-            if changed:
-                fixed += 1
-                print(
-                    f"  team fix id={team.id} key={new_key!r} display={new_display!r}"
-                )
 
     if not dry_run:
         await session.flush()
@@ -170,18 +211,20 @@ async def _dedupe_teams_loop(
     labels, sports = _match_team_context(matches)
     total = 0
     for pass_no in range(1, max_passes + 1):
-        removed = await dedupe_teams(
-            session,
-            dry_run=dry_run,
-            match_labels=labels,
-            match_sports=sports,
-        )
+        with session.no_autoflush:
+            removed = await dedupe_teams(
+                session,
+                dry_run=dry_run,
+                match_labels=labels,
+                match_sports=sports,
+            )
         if removed == 0:
             break
         print(f"  dedupe pass {pass_no}: merged {removed} teams")
         total += removed
         if dry_run:
             break
+        await session.flush()
         matches = list(await session.scalars(select(Match)))
         labels, sports = _match_team_context(matches)
     return total
@@ -191,17 +234,17 @@ async def run_repair_catalog(*, dry_run: bool = False) -> dict[str, int]:
     """
     Полная миграция справочника:
     1. Нормализация подписей в матчах
-    2. Пересчёт key/display у всех teams
-    3. Слияние дубликатов teams (несколько проходов)
-    4. Перепривязка team_*_id в матчах
-    5. Повторный rebuild + dedupe
-    6. Слияние дубликатов matches
+    2. Слияние дубликатов teams
+    3. Пересчёт key/display у всех teams
+    4. Повторный dedupe
+    5. Перепривязка team_*_id в матчах
+    6. Финальный rebuild + dedupe + matches
     """
     async with async_session_factory() as session:
         try:
             matches = list(await session.scalars(select(Match)))
 
-            labels_fixed = await _fix_match_labels(session)
+            labels_fixed = await _fix_match_labels(session, dry_run=dry_run)
             print(f"==> match labels fixed: {labels_fixed}")
 
             print("==> dedupe teams (pass 1)")
@@ -209,7 +252,6 @@ async def run_repair_catalog(*, dry_run: bool = False) -> dict[str, int]:
                 session, matches, dry_run=dry_run
             )
             if not dry_run:
-                await session.flush()
                 matches = list(await session.scalars(select(Match)))
 
             teams_rebuilt = await _rebuild_all_teams(
