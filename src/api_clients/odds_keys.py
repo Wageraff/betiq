@@ -19,17 +19,14 @@ ODDS_KEYS_CLUB_LEAGUES: list[str] = [
     "soccer_uefa_europa_league",
 ]
 
+# Квалификации africa/asia/oceania/concacaf и copa_america — только в сезон;
+# 404 вне сезона обрабатывается в TheOddsApiClient.
 ODDS_KEYS_INTERNATIONAL: list[str] = [
     "soccer_fifa_world_cup",
     "soccer_fifa_world_cup_qualifiers_europe",
     "soccer_fifa_world_cup_qualifiers_south_america",
-    "soccer_fifa_world_cup_qualifiers_africa",
-    "soccer_fifa_world_cup_qualifiers_asia",
-    "soccer_fifa_world_cup_qualifiers_oceania",
-    "soccer_fifa_world_cup_qualifiers_concacaf",
     "soccer_uefa_nations_league",
     "soccer_uefa_euro_qualification",
-    "soccer_copa_america",
 ]
 
 _COMPETITION_PATTERNS: list[tuple[re.Pattern[str], list[str]]] = [

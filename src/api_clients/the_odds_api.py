@@ -28,6 +28,10 @@ class TheOddsApiClient:
         p["apiKey"] = self.api_key
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(f"{BASE_URL}{path}", params=p)
+            if resp.status_code == 404:
+                # Лига вне сезона или sport_key неактивен — не ошибка.
+                log.debug("The Odds API 404 (inactive): %s", path)
+                return []
             resp.raise_for_status()
             data = resp.json()
         if isinstance(data, list):
