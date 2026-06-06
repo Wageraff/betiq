@@ -101,7 +101,11 @@ async def job_fetch_odds_football() -> None:
             n_odds = await sync_all_odds(session, football_only=True)
         if settings.api_football_odds_enabled and settings.api_football_key:
             n_af = await sync_api_football_odds(session)
-        log.info("job_fetch_odds_football: odds_api=%s api_football=%s", n_odds, n_af)
+        log.info(
+            "job_fetch_odds_football: the_odds_api=%s api_football=%s",
+            n_odds,
+            n_af,
+        )
 
 
 async def job_fetch_odds_other() -> None:

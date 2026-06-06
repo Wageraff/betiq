@@ -42,6 +42,22 @@ class TheOddsApiClient:
         log.warning("The Odds API unexpected response: %s", type(data))
         return []
 
+    async def _get_object(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> dict | None:
+        if not self.enabled:
+            return None
+        p = dict(params or {})
+        p["apiKey"] = self.api_key
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(f"{BASE_URL}{path}", params=p)
+            if resp.status_code in (404, 422):
+                log.debug("The Odds API %s: %s", resp.status_code, path)
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+        return data if isinstance(data, dict) else None
+
     async def get_events(self, sport_key: str) -> list[dict]:
         return await self._get(f"/sports/{sport_key}/events")
 
@@ -55,6 +71,23 @@ class TheOddsApiClient:
         mkt = markets or settings.the_odds_api_markets
         return await self._get(
             f"/sports/{sport_key}/odds",
+            {"regions": regions, "markets": mkt, "oddsFormat": "decimal"},
+        )
+
+    async def get_event_odds(
+        self,
+        sport_key: str,
+        event_id: str,
+        *,
+        regions: str = "eu",
+        markets: str | None = None,
+    ) -> dict | None:
+        """Расширенные рынки — только per-event endpoint (btts, alternate_*, …)."""
+        mkt = markets or settings.the_odds_api_event_markets
+        if not mkt.strip():
+            return None
+        return await self._get_object(
+            f"/sports/{sport_key}/events/{event_id}/odds",
             {"regions": regions, "markets": mkt, "oddsFormat": "decimal"},
         )
 

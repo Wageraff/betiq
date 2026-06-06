@@ -33,6 +33,14 @@ THE_ODDS_API_MARKET_KEYS = frozenset(
 )
 
 
+def _odds_outcome_label(value: object) -> str:
+    if value is None:
+        return "?"
+    if isinstance(value, str):
+        return value.strip() or "?"
+    return str(value).strip() or "?"
+
+
 def odds_provider_for_market(market: str) -> str:
     """Источник строки в match_odds по ключу/названию рынка."""
     key = (market or "").strip().lower().replace(" ", "_")
@@ -163,7 +171,7 @@ async def ingest_api_football_odds(
         for bet in bookmaker.get("bets") or []:
             market = (bet.get("name") or "unknown").strip()
             for val in bet.get("values") or []:
-                outcome = (val.get("value") or "?").strip()
+                outcome = _odds_outcome_label(val.get("value"))
                 price = val.get("odd")
                 if price is None:
                     continue

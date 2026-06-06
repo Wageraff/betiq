@@ -16,8 +16,10 @@ from src.api_clients.constants import (
 from src.api_clients.external_ids import save_match_external_id
 from src.api_clients.matching import event_matches_teams
 from src.api_clients.odds import ingest_odds_api_event
+from src.api_clients.odds_keys import odds_sport_keys_for_match
 from src.api_clients.the_odds_api import TheOddsApiClient
-from src.db.models import Match
+from src.config import settings
+from src.db.models import Match, MatchExternalId
 
 log = logging.getLogger("odds_sync")
 
@@ -110,6 +112,41 @@ async def sync_odds_for_sport_key(session: AsyncSession, sport_key: str) -> int:
     return count
 
 
+async def sync_linked_event_odds(
+    session: AsyncSession, *, football_only: bool = True
+) -> int:
+    """btts / alternate_* через per-event endpoint для матчей с event_id."""
+    if not settings.the_odds_api_event_markets.strip():
+        return 0
+    client = TheOddsApiClient()
+    if not client.enabled:
+        return 0
+
+    stmt = (
+        select(Match, MatchExternalId.external_id)
+        .join(MatchExternalId, MatchExternalId.match_id == Match.id)
+        .where(MatchExternalId.provider == PROVIDER_THE_ODDS_API)
+    )
+    if football_only:
+        stmt = stmt.where(Match.sport == "football")
+    stmt = stmt.limit(settings.the_odds_api_event_batch_size)
+    rows = (await session.execute(stmt)).all()
+
+    total = 0
+    for match, event_id in rows:
+        if not event_id:
+            continue
+        sport_keys = await odds_sport_keys_for_match(session, match)
+        for sport_key in sport_keys:
+            event = await client.get_event_odds(sport_key, event_id)
+            if event and event.get("bookmakers"):
+                total += await ingest_odds_api_event(session, match, event)
+                break
+    await session.commit()
+    log.info("The Odds API event odds: %s lines for %s matches", total, len(rows))
+    return total
+
+
 async def sync_all_odds(session: AsyncSession, *, football_only: bool = False) -> int:
     total = 0
     keys = ODDS_SPORT_KEYS_FOOTBALL if football_only else list(SPORT_TO_ODDS_KEY.values())
@@ -118,4 +155,9 @@ async def sync_all_odds(session: AsyncSession, *, football_only: bool = False) -
             total += await sync_odds_for_sport_key(session, key)
         except Exception:
             log.exception("Odds sync failed for %s", key)
+    if football_only:
+        try:
+            total += await sync_linked_event_odds(session, football_only=True)
+        except Exception:
+            log.exception("Event odds sync failed")
     return total

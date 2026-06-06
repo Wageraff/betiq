@@ -117,7 +117,14 @@ class Settings(BaseSettings):
     api_link_batch_size: int = int(_api_sync.get("link_batch_size", fallback=50))
     the_odds_api_markets: str = _api_sync.get(
         "odds_markets",
-        fallback="h2h,spreads,totals,btts,draw_no_bet,alternate_spreads,alternate_totals",
+        fallback="h2h,spreads,totals",
+    )
+    the_odds_api_event_markets: str = _api_sync.get(
+        "odds_event_markets",
+        fallback="btts,draw_no_bet,alternate_spreads,alternate_totals",
+    )
+    the_odds_api_event_batch_size: int = int(
+        _api_sync.get("odds_event_batch_size", fallback=40)
     )
     api_football_odds_enabled: bool = _api_sync.getboolean(
         "api_football_odds_enabled", fallback=True
