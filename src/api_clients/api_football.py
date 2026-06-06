@@ -58,6 +58,9 @@ class ApiFootballClient:
             params["date"] = date
         if team is not None:
             params["team"] = team
+            # API-Football требует season при фильтре по team.
+            if season is None and date:
+                season = int(str(date)[:4])
         if fixture is not None:
             params["id"] = fixture
         if league is not None:
