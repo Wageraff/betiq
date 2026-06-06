@@ -334,3 +334,34 @@ export type Settings = {
   admin_configured: boolean;
   anthropic_configured: boolean;
 };
+
+export type ApiQuotaStatus = {
+  the_odds_api_remaining?: number | null;
+  the_odds_api_used?: number | null;
+  api_football_remaining?: number | null;
+  api_football_limit?: number | null;
+  checked_at: string;
+};
+
+export type CompetitionItem = {
+  id: number;
+  name: string;
+  sport: string;
+  country?: string | null;
+  country_code?: string | null;
+  matches_upcoming: number;
+  is_tracked: boolean;
+  sync_odds: boolean;
+  sync_stats: boolean;
+  sync_lineups: boolean;
+  odds_markets?: string[] | null;
+  odds_days_ahead?: number | null;
+};
+
+export type CompetitionsList = {
+  items: CompetitionItem[];
+  total: number;
+  page: number;
+  limit: number;
+  quota: ApiQuotaStatus;
+};

@@ -102,6 +102,12 @@ class Competition(Base):
     logo_url: Mapped[Optional[str]] = mapped_column(String(500))
     flag_url: Mapped[Optional[str]] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    is_tracked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    sync_odds: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    sync_stats: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    sync_lineups: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    odds_markets: Mapped[Optional[str]] = mapped_column(Text)
+    odds_days_ahead: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -352,6 +358,26 @@ class MatchOdds(Base):
     )
 
     match: Mapped["Match"] = relationship(back_populates="odds")
+
+
+class ApiQuotaSnapshot(Base):
+    __tablename__ = "api_quota_snapshots"
+    __table_args__ = (Index("idx_quota_provider_time", "provider", "recorded_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    requests_remaining: Mapped[Optional[int]] = mapped_column(Integer)
+    requests_used: Mapped[Optional[int]] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class OddsSyncLog(Base):
+    __tablename__ = "odds_sync_log"
+
+    sport_key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class OddsHistory(Base):

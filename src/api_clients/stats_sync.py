@@ -4,13 +4,14 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.api_football import ApiFootballClient
 from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_match_external_id, get_team_external_id
-from src.db.models import Match, MatchLineup, MatchStats, TeamForm
+from src.api_clients.odds_scope import _competition_sync_clause, upcoming_matches
+from src.db.models import Competition, Match, MatchExternalId, MatchLineup, MatchStats, TeamForm
 
 log = logging.getLogger("stats_sync")
 
@@ -215,18 +216,24 @@ def fuzzy_side_home(team_info: dict, match: Match) -> bool:
     return fuzzy_match(team_info.get("name", ""), match.team_home)
 
 
+async def _linked_football_match_ids(session: AsyncSession) -> set[int]:
+    rows = await session.scalars(
+        select(MatchExternalId.match_id).where(
+            MatchExternalId.provider == PROVIDER_API_FOOTBALL
+        )
+    )
+    return set(rows.all())
+
+
 async def sync_prematch_forms(session: AsyncSession, *, hours: int = 48) -> int:
     until = datetime.now(timezone.utc) + timedelta(hours=hours)
-    matches = (
-        await session.scalars(
-            select(Match).where(
-                Match.sport == "football",
-                Match.match_date.isnot(None),
-                Match.match_date <= until,
-                Match.match_date >= datetime.now(timezone.utc),
-            )
-        )
-    ).all()
+    now = datetime.now(timezone.utc)
+    linked = await _linked_football_match_ids(session)
+    matches = [
+        m
+        for m in await upcoming_matches(session, sports={"football"}, for_stats_sync=True)
+        if m.id in linked and m.match_date and now <= m.match_date <= until
+    ]
     total = 0
     seen: set[int] = set()
     for m in matches:
@@ -240,13 +247,21 @@ async def sync_prematch_forms(session: AsyncSession, *, hours: int = 48) -> int:
 
 
 async def sync_post_match_stats(session: AsyncSession) -> int:
+    linked = await _linked_football_match_ids(session)
+    if not linked:
+        return 0
     matches = (
         await session.scalars(
-            select(Match).where(
+            select(Match)
+            .join(Competition, Match.competition_id == Competition.id, isouter=True)
+            .where(
                 Match.sport == "football",
                 Match.status == "FT",
                 Match.stats_fetched_at.is_(None),
-            ).limit(30)
+                Match.id.in_(linked),
+                _competition_sync_clause("sync_stats"),
+            )
+            .limit(30)
         )
     ).all()
     n = 0
@@ -259,16 +274,14 @@ async def sync_post_match_stats(session: AsyncSession) -> int:
 
 async def sync_upcoming_lineups(session: AsyncSession) -> int:
     now = datetime.now(timezone.utc)
-    matches = (
-        await session.scalars(
-            select(Match).where(
-                Match.sport == "football",
-                Match.match_date.isnot(None),
-                Match.match_date >= now,
-                Match.match_date <= now + timedelta(hours=2),
-            )
-        )
-    ).all()
+    linked = await _linked_football_match_ids(session)
+    matches = [
+        m
+        for m in await upcoming_matches(session, sports={"football"}, for_lineups_sync=True)
+        if m.id in linked
+        and m.match_date
+        and now <= m.match_date <= now + timedelta(hours=2)
+    ]
     n = 0
     for m in matches:
         if await fetch_lineups(session, m):

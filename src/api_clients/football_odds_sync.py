@@ -28,7 +28,7 @@ async def sync_api_football_odds(
         return 0
 
     batch = limit if limit is not None else settings.api_football_odds_batch_size
-    all_upcoming = await upcoming_football_matches(session)
+    all_upcoming = await upcoming_football_matches(session, for_odds_sync=True)
     linked_ids = set(
         await session.scalars(
             select(MatchExternalId.match_id).where(
@@ -82,4 +82,5 @@ async def upcoming_af_odds_match_ids(session: AsyncSession) -> list[int]:
             )
         )
     )
-    return [m.id for m in await upcoming_football_matches(session) if m.id in linked_ids]
+    upcoming = await upcoming_football_matches(session, for_odds_sync=True)
+    return [m.id for m in upcoming if m.id in linked_ids]

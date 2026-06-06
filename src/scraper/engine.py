@@ -20,6 +20,7 @@ from src.config import settings, setup_logging
 from src.db.models import Match, Prediction, PredictionBet, ScrapeLog, Source
 from src.db.session import async_session_factory
 from src.scraper.sources import load_source_module
+from src.scraper.utils.normalizer import is_allowed_bet_type
 from src.scraper.utils.browser import (
     browser_lifecycle,
     ensure_proxy_configured,
@@ -154,7 +155,12 @@ async def _persist_prediction(
     session.add(pred)
     await session.flush()
 
-    for i, bet in enumerate(data.get("bets") or []):
+    bets = [
+        b
+        for b in (data.get("bets") or [])
+        if is_allowed_bet_type(b.get("bet_type"))
+    ]
+    for i, bet in enumerate(bets):
         session.add(
             PredictionBet(
                 prediction_id=pred.id,

@@ -6,6 +6,7 @@ import TeamsPage from "./pages/TeamsPage";
 import AiPage from "./pages/AiPage";
 import SettingsPage from "./pages/SettingsPage";
 import ApiPage from "./pages/ApiPage";
+import CompetitionsPage from "./pages/CompetitionsPage";
 
 function LoginGate({ children }: { children: React.ReactNode }) {
   const [key, setKey] = useState(localStorage.getItem("admin_key") || "");
@@ -64,6 +65,9 @@ function Nav() {
       <Link to="/api" className={cls("/api")}>
         Sport API
       </Link>
+      <Link to="/competitions" className={cls("/competitions")}>
+        Лиги
+      </Link>
       <Link to="/settings" className={cls("/settings")}>
         Настройки
       </Link>
@@ -96,6 +100,7 @@ export default function App() {
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/ai" element={<AiPage />} />
             <Route path="/api" element={<ApiPage />} />
+            <Route path="/competitions" element={<CompetitionsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -34,6 +34,8 @@ async def main_async(action: str) -> None:
         await api_jobs.job_fetch_post_match_stats()
     elif action == "cleanup":
         await api_jobs.job_cleanup_ai_cache()
+    elif action == "cleanup_data":
+        await api_jobs.job_cleanup_old_data()
     else:
         raise SystemExit(f"Unknown action: {action}")
 
@@ -43,7 +45,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="BetIQ external API sync")
     parser.add_argument(
         "action",
-        choices=["link", "leagues", "logos", "form", "lineups", "odds", "stats", "cleanup"],
+        choices=[
+            "link",
+            "leagues",
+            "logos",
+            "form",
+            "lineups",
+            "odds",
+            "stats",
+            "cleanup",
+            "cleanup_data",
+        ],
     )
     args = parser.parse_args()
     asyncio.run(main_async(args.action))

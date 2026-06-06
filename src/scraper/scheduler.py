@@ -147,6 +147,7 @@ def main() -> None:
             (api_jobs.job_fetch_odds, "*/10 * * * *", "api_fetch_odds"),
             (api_jobs.job_fetch_post_match_stats, "*/5 * * * *", "api_post_match_stats"),
             (api_jobs.job_cleanup_ai_cache, "0 4 * * *", "api_cleanup_ai_cache"),
+            (api_jobs.job_cleanup_old_data, "0 3 * * *", "api_cleanup_old_data"),
         ]
         for fn, cron, jid in _api_jobs:
             scheduler.add_job(fn, CronTrigger.from_crontab(cron), id=jid, **_JOB_KW)

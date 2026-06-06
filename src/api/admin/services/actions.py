@@ -97,6 +97,7 @@ async def api_sync(action: str) -> str:
         "odds",
         "stats",
         "cleanup",
+        "cleanup_data",
     }
     if action not in allowed:
         raise ValueError(f"Unknown api_sync action: {action}")

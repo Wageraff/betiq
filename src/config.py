@@ -148,6 +148,12 @@ class Settings(BaseSettings):
     admin_match_odds_limit: int = int(
         _api_sync.get("admin_match_odds_limit", fallback=500)
     )
+    odds_min_interval_minutes: int = int(
+        _api_sync.get("odds_min_interval_minutes", fallback=30)
+    )
+    api_quota_alert_threshold: int = int(
+        _api_sync.get("api_quota_alert_threshold", fallback=100)
+    )
 
 
 settings = Settings()

@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from src.api_clients.competitions_sync import sync_leagues_from_api_football
 from src.api_clients.constants import PROVIDER_API_FOOTBALL
@@ -19,7 +20,7 @@ from src.api_clients.stats_sync import (
 from src.api_clients.ai_cache import cleanup_expired_cache
 from src.api_clients.api_football import ApiFootballClient
 from src.config import settings
-from src.db.models import Team
+from src.db.models import ApiQuotaSnapshot, Match, MatchOdds, OddsHistory, Team
 from src.db.session import async_session_factory
 
 log = logging.getLogger("api_jobs")
@@ -136,3 +137,35 @@ async def job_cleanup_ai_cache() -> None:
     async with async_session_factory() as session:
         n = await cleanup_expired_cache(session)
         log.info("job_cleanup_ai_cache: %s", n)
+
+
+async def job_cleanup_old_data() -> None:
+    """Удалить устаревшие odds_history, quota snapshots и match_odds завершённых матчей."""
+    now = datetime.now(timezone.utc)
+    cutoff_odds = now - timedelta(days=14)
+    cutoff_quota = now - timedelta(days=30)
+    cutoff_finished = now - timedelta(days=7)
+    finished_statuses = ("FT", "AET", "PEN", "CANC")
+
+    async with async_session_factory() as session:
+        hist = await session.execute(
+            delete(OddsHistory).where(OddsHistory.recorded_at < cutoff_odds)
+        )
+        quota = await session.execute(
+            delete(ApiQuotaSnapshot).where(ApiQuotaSnapshot.recorded_at < cutoff_quota)
+        )
+        finished_ids = select(Match.id).where(
+            Match.match_date.isnot(None),
+            Match.match_date < cutoff_finished,
+            Match.status.in_(finished_statuses),
+        )
+        odds = await session.execute(
+            delete(MatchOdds).where(MatchOdds.match_id.in_(finished_ids))
+        )
+        await session.commit()
+        log.info(
+            "job_cleanup_old_data: odds_history=%s quota=%s match_odds=%s",
+            hist.rowcount,
+            quota.rowcount,
+            odds.rowcount,
+        )

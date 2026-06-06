@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.odds_keys import (
@@ -12,7 +12,7 @@ from src.api_clients.odds_keys import (
     odds_sport_keys_for_match,
 )
 from src.config import settings
-from src.db.models import Match, MatchExternalId, MatchOdds
+from src.db.models import Competition, Match, MatchExternalId, MatchOdds
 
 _FINISHED_STATUSES = frozenset(
     {"FT", "AET", "PEN", "CANC", "ABD", "AWD", "WO", "PST"}
@@ -36,8 +36,18 @@ def is_upcoming_match(match: Match, *, since: datetime, until: datetime) -> bool
     return True
 
 
+def _competition_sync_clause(sync_field: str):
+    col = getattr(Competition, sync_field)
+    return or_(Match.competition_id.is_(None), col.is_(True))
+
+
 async def upcoming_matches(
-    session: AsyncSession, *, sports: set[str] | None = None
+    session: AsyncSession,
+    *,
+    sports: set[str] | None = None,
+    for_odds_sync: bool = False,
+    for_stats_sync: bool = False,
+    for_lineups_sync: bool = False,
 ) -> list[Match]:
     since, until = upcoming_match_window()
     stmt = select(Match).where(
@@ -45,14 +55,32 @@ async def upcoming_matches(
         Match.match_date >= since,
         Match.match_date <= until,
     )
+    if for_odds_sync or for_stats_sync or for_lineups_sync:
+        stmt = select(Match).join(
+            Competition, Match.competition_id == Competition.id, isouter=True
+        ).where(
+            Match.match_date.isnot(None),
+            Match.match_date >= since,
+            Match.match_date <= until,
+        )
+        if for_odds_sync:
+            stmt = stmt.where(_competition_sync_clause("sync_odds"))
+        if for_stats_sync:
+            stmt = stmt.where(_competition_sync_clause("sync_stats"))
+        if for_lineups_sync:
+            stmt = stmt.where(_competition_sync_clause("sync_lineups"))
     if sports:
         stmt = stmt.where(Match.sport.in_(sorted(sports)))
     rows = (await session.scalars(stmt.order_by(Match.match_date.asc()))).all()
     return [m for m in rows if is_upcoming_match(m, since=since, until=until)]
 
 
-async def upcoming_football_matches(session: AsyncSession) -> list[Match]:
-    return await upcoming_matches(session, sports={"football"})
+async def upcoming_football_matches(
+    session: AsyncSession, *, for_odds_sync: bool = False
+) -> list[Match]:
+    return await upcoming_matches(
+        session, sports={"football"}, for_odds_sync=for_odds_sync
+    )
 
 
 async def collect_odds_sport_keys(
@@ -82,7 +110,7 @@ async def sport_keys_for_odds_sync(
                 out.append(k)
         return out
 
-    matches = await upcoming_matches(session, sports=sports)
+    matches = await upcoming_matches(session, sports=sports, for_odds_sync=True)
     by_key = await collect_odds_sport_keys(session, matches)
     return sorted(by_key.keys())
 

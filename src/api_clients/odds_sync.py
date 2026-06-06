@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.constants import PROVIDER_THE_ODDS_API, sport_for_odds_key
+from src.api_clients.quota_log import get_last_odds_sync, record_odds_sync
+from src.config import settings
 from src.api_clients.external_ids import save_match_external_id
 from src.api_clients.matching import event_matches_teams
 from src.api_clients.odds import ingest_odds_api_event
@@ -17,7 +19,6 @@ from src.api_clients.odds_scope import (
     upcoming_matches,
 )
 from src.api_clients.the_odds_api import TheOddsApiClient
-from src.config import settings
 from src.db.models import Match, MatchExternalId
 
 log = logging.getLogger("odds_sync")
@@ -125,7 +126,10 @@ async def sync_linked_event_odds(
     if "football" not in event_sports:
         return 0
 
-    upcoming_ids = {m.id for m in await upcoming_matches(session, sports={"football"})}
+    upcoming_ids = {
+        m.id
+        for m in await upcoming_matches(session, sports={"football"}, for_odds_sync=True)
+    }
     if not upcoming_ids:
         return 0
     stmt = (
@@ -161,23 +165,38 @@ async def sync_linked_event_odds(
 
 
 async def sync_all_odds(
-    session: AsyncSession, *, sports: set[str] | None = None
+    session: AsyncSession,
+    *,
+    sports: set[str] | None = None,
+    force: bool = False,
 ) -> int:
     """The Odds API bulk (+ event-odds для football). sports=None → все поддерживаемые."""
     keys = await sport_keys_for_odds_sync(session, sports=sports)
-    upcoming = await upcoming_matches(session, sports=sports)
+    upcoming = await upcoming_matches(session, sports=sports, for_odds_sync=True)
     log.info(
-        "Odds sync mode=%s sports=%s keys=%s upcoming_matches=%s",
+        "Odds sync mode=%s sports=%s keys=%s upcoming_matches=%s force=%s",
         settings.odds_sync_mode,
         sorted(sports) if sports else "all",
         keys,
         len(upcoming),
+        force,
     )
+    min_interval = settings.odds_min_interval_minutes * 60
+    now = datetime.now(timezone.utc)
     total = 0
     for key in keys:
+        if not force:
+            last = await get_last_odds_sync(session, key)
+            if last and (now - last).total_seconds() < min_interval:
+                log.debug("Skip odds sync %s, last=%s", key, last)
+                continue
         try:
-            total += await sync_odds_for_sport_key(session, key)
+            n = await sync_odds_for_sport_key(session, key)
+            total += n
+            await record_odds_sync(session, key)
+            await session.commit()
         except Exception:
+            await session.rollback()
             log.exception("Odds sync failed for %s", key)
     if sports is None or "football" in sports:
         try:

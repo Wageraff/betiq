@@ -367,3 +367,53 @@ class ApiSyncStatusOut(BaseModel):
     the_odds_api: ApiProviderQuotaOut
     db_counts: dict[str, int]
     coverage: Optional[ApiSyncCoverageOut] = None
+
+
+class CompetitionTrackingOut(BaseModel):
+    id: int
+    name: str
+    sport: str
+    country: Optional[str] = None
+    country_code: Optional[str] = None
+    matches_upcoming: int = 0
+    is_tracked: bool = False
+    sync_odds: bool = False
+    sync_stats: bool = False
+    sync_lineups: bool = False
+    odds_markets: Optional[list[str]] = None
+    odds_days_ahead: Optional[int] = None
+
+
+class CompetitionTrackingUpdate(BaseModel):
+    is_tracked: Optional[bool] = None
+    sync_odds: Optional[bool] = None
+    sync_stats: Optional[bool] = None
+    sync_lineups: Optional[bool] = None
+    odds_markets: Optional[list[str]] = None
+    odds_days_ahead: Optional[int] = None
+    clear_odds_days_ahead: bool = False
+
+
+class ApiQuotaStatusOut(BaseModel):
+    the_odds_api_remaining: Optional[int] = None
+    the_odds_api_used: Optional[int] = None
+    api_football_remaining: Optional[int] = None
+    api_football_limit: Optional[int] = None
+    checked_at: datetime
+
+
+class CompetitionsListOut(BaseModel):
+    items: list[CompetitionTrackingOut]
+    total: int
+    page: int
+    limit: int
+    quota: ApiQuotaStatusOut
+
+
+class CompetitionSyncNowOut(BaseModel):
+    competition_id: int
+    matches: int
+    sport_keys: list[str] = Field(default_factory=list)
+    the_odds_api_lines: int = 0
+    api_football_lines: int = 0
+    error: Optional[str] = None

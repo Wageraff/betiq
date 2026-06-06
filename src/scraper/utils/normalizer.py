@@ -61,6 +61,27 @@ _MMA_COMPETITION_RE = re.compile(
     r"\b(ufc|bellator|pfl|one\s+championship|mma|bare\s+knuckle)\b", re.I
 )
 
+ALLOWED_BET_TYPES = frozenset({
+    "1x2",
+    "1X2",
+    "winner",
+    "total",
+    "totals",
+    "both_teams_score",
+    "btts",
+    "handicap",
+    "double_chance",
+    "draw_no_bet",
+})
+
+_ALLOWED_BET_TYPES_LOWER = {b.lower() for b in ALLOWED_BET_TYPES}
+
+
+def is_allowed_bet_type(bet_type: str | None) -> bool:
+    if not bet_type or not str(bet_type).strip():
+        return True
+    return str(bet_type).lower().strip() in _ALLOWED_BET_TYPES_LOWER
+
 
 def infer_sport_from_competition(competition: Optional[str]) -> Optional[str]:
     """UFC/MMA в названии турнира → mma, даже если URL/раздел источника — tennis."""

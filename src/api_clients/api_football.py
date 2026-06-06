@@ -31,11 +31,28 @@ class ApiFootballClient:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(f"{BASE_URL}{path}", headers=headers, params=params or {})
             resp.raise_for_status()
+            await self._log_quota_headers(resp)
             data = resp.json()
         errors = data.get("errors") or {}
         if errors:
             log.warning("API-Football errors: %s", errors)
         return data.get("response") or []
+
+    @staticmethod
+    async def _log_quota_headers(resp: httpx.Response) -> None:
+        from src.api_clients.quota_log import save_quota_snapshot
+
+        def _int(h: str) -> int | None:
+            try:
+                return int(resp.headers.get(h, ""))
+            except ValueError:
+                return None
+
+        limit = _int("x-ratelimit-requests-limit")
+        remaining = _int("x-ratelimit-requests-remaining")
+        if remaining is not None:
+            used = (limit - remaining) if limit is not None else None
+            await save_quota_snapshot("api_football", remaining, used)
 
     async def get_leagues(self, *, season: int | None = None) -> list[dict]:
         params: dict[str, Any] = {}
@@ -92,4 +109,15 @@ class ApiFootballClient:
             resp = await client.get(f"{BASE_URL}/status", headers=headers)
             resp.raise_for_status()
             data = resp.json()
+        req = (data.get("response") or {}).get("requests") or {}
+        limit_day = req.get("limit_day")
+        current = req.get("current")
+        if limit_day is not None and current is not None:
+            from src.api_clients.quota_log import save_quota_snapshot
+
+            await save_quota_snapshot(
+                "api_football",
+                int(limit_day) - int(current),
+                int(current),
+            )
         return data.get("response") or {}

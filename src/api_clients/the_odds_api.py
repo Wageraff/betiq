@@ -36,11 +36,27 @@ class TheOddsApiClient:
                 log.warning("The Odds API invalid params: %s %s", path, resp.text[:200])
                 return []
             resp.raise_for_status()
+            await self._log_quota_headers(resp)
             data = resp.json()
         if isinstance(data, list):
             return data
         log.warning("The Odds API unexpected response: %s", type(data))
         return []
+
+    @staticmethod
+    async def _log_quota_headers(resp: httpx.Response) -> None:
+        from src.api_clients.quota_log import save_quota_snapshot
+
+        def _int(h: str) -> int | None:
+            try:
+                return int(resp.headers.get(h, ""))
+            except ValueError:
+                return None
+
+        remaining = _int("x-requests-remaining")
+        used = _int("x-requests-used")
+        if remaining is not None or used is not None:
+            await save_quota_snapshot("the_odds_api", remaining, used)
 
     async def _get_object(
         self, path: str, params: dict[str, Any] | None = None
@@ -55,6 +71,7 @@ class TheOddsApiClient:
                 log.debug("The Odds API %s: %s", resp.status_code, path)
                 return None
             resp.raise_for_status()
+            await self._log_quota_headers(resp)
             data = resp.json()
         return data if isinstance(data, dict) else None
 

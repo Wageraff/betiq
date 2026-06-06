@@ -34,6 +34,7 @@ const SYNC_ACTIONS: { id: string; label: string; hint: string }[] = [
   { id: "stats", label: "Post-match stats", hint: "FT only" },
   { id: "logos", label: "Team logos", hint: "API-Football CDN" },
   { id: "cleanup", label: "Cleanup AI cache", hint: "expired rows" },
+  { id: "cleanup_data", label: "Cleanup old data", hint: "odds history, finished odds" },
 ];
 
 function QuotaBar({ used, limit }: { used: number; limit: number }) {
