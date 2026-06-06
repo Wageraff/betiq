@@ -75,6 +75,15 @@ async def job_health_check() -> None:
     await run_health_checks()
 
 
+async def job_morning_digest() -> None:
+    if not settings.telegram_morning_digest_enabled:
+        return
+    from src.bot.digest import send_morning_digest
+
+    log.info("Scheduled: morning Telegram digest")
+    await send_morning_digest()
+
+
 def main() -> None:
     setup_logging()
     _verify_proxy_pool()
@@ -117,9 +126,18 @@ def main() -> None:
         replace_existing=True,
         **_JOB_KW,
     )
+    if settings.telegram_morning_digest_enabled:
+        scheduler.add_job(
+            job_morning_digest,
+            CronTrigger.from_crontab("5 8 * * *"),
+            id="morning_digest",
+            replace_existing=True,
+            **_JOB_KW,
+        )
     scheduler.start()
     log.info(
-        "Scheduler started (full %sh limit=%s, quick hourly :15 limit=%s, AI 2h, health 08:00 UTC)",
+        "Scheduler started (full %sh limit=%s, quick hourly :15 limit=%s, "
+        "AI 2h, health 08:00 UTC, digest 08:05 UTC)",
         "4",
         settings.scrape_full_limit,
         settings.scrape_quick_limit,

@@ -1,5 +1,5 @@
 """
-Telegram-бот: статус, health, логи, парсинг, add_source.
+Telegram-бот: дашборд, меню, парсинг, AI, сервисные команды.
 Запуск: python -m src.bot.telegram
 """
 from __future__ import annotations
@@ -24,20 +24,65 @@ from telegram.ext import (
     filters,
 )
 
-from src.ai.summarizer import needs_ai
+from src.ai.summarizer import _matches_needing_ai, generate_for_match, needs_ai
+from src.bot.digest import send_morning_digest
+from src.bot.formatters import (
+    build_dashboard_text,
+    build_digest_text,
+    build_log_info_text,
+    build_logs_text,
+    read_log_tail,
+    split_telegram_messages,
+)
+from src.bot.keyboards import (
+    MENU_AI,
+    MENU_BUTTONS,
+    MENU_DASHBOARD,
+    MENU_DIAGNOSE,
+    MENU_HELP,
+    MENU_LOGS,
+    MENU_SCRAPE,
+    MENU_SERVICE,
+    MENU_SOURCES,
+    ai_matches_keyboard,
+    main_menu_keyboard,
+    service_inline_keyboard,
+    sources_inline_keyboard,
+)
 from src.config import settings, setup_logging
 from src.db.models import HealthCheck, Match, Prediction, ScrapeLog, Source
 from src.db.session import async_session_factory
 from src.scraper.diagnose import diagnose_source
 from src.scraper.engine import run_scrape, run_scrape_source
+from src.scraper.health_check import run_health_checks
 from src.scraper.utils.alert_cooldown import snooze_source
 from src.scraper.utils.alerter import send_message
 from src.scraper.utils.browser import browser_lifecycle
 
 log = logging.getLogger("telegram_bot")
 
-# add_source conversation states
 ASK_BASE_URL, ASK_CATEGORY, ASK_LANGUAGE, ASK_GEO = range(4)
+
+HELP_TEXT = (
+    "<b>BetIQ Admin Bot</b>\n\n"
+    "Используйте кнопки меню или команды:\n"
+    "/dashboard — сводка по источникам\n"
+    "/digest — утренняя сводка\n"
+    "/sources — все источники\n"
+    "/health — health checks\n"
+    "/logs [N|errors|module] — scrape logs\n"
+    "/scrape [module] — парсинг\n"
+    "/diagnose [module] — Cloudflare test\n"
+    "/ai [match_id|list] — AI summaries\n"
+    "/match &lt;slug&gt; — карточка матча\n"
+    "/loginfo — размер app.log\n"
+    "/logtail [N] — последние строки лога\n"
+    "/repair — repair catalog\n"
+    "/health_run — health check сейчас\n"
+    "/add_source — новый источник\n"
+    "/menu — обновить клавиатуру\n\n"
+    "На алертах: Retry, Diagnose, Logs, Snooze, Disable/Enable"
+)
 
 
 def _effective_chat_id(update: Update) -> Optional[int]:
@@ -76,8 +121,25 @@ async def _deny_if_not_admin(update: Update) -> bool:
     return True
 
 
+async def _reply_html(
+    update: Update,
+    text: str,
+    *,
+    reply_markup=None,
+) -> None:
+    if not update.message:
+        return
+    parts = split_telegram_messages(text)
+    km = reply_markup or main_menu_keyboard()
+    for i, part in enumerate(parts):
+        await update.message.reply_text(
+            part,
+            parse_mode="HTML",
+            reply_markup=km if i == len(parts) - 1 else None,
+        )
+
+
 async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Показать chat_id без проверки admin — для настройки .env."""
     chat_id = _effective_chat_id(update)
     user = update.effective_user
     username = user.username if user else "?"
@@ -108,18 +170,35 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _deny_if_not_admin(update):
         return
     await update.message.reply_text(
-        "BetIQ Admin Bot\n\n"
-        "/status — active sources\n"
-        "/sources — all sources\n"
-        "/health — last health checks\n"
-        "/logs [N] — scrape logs\n"
-        "/scrape [module] — run parser\n"
-        "/diagnose [module] — Cloudflare test\n"
-        "/match [slug] — match info\n"
-        "/add_source — add new source\n"
-        "/whoami — your chat_id for .env\n\n"
-        "Alert buttons: Retry, Diagnose, Logs, Snooze, Disable/Enable"
+        HELP_TEXT,
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
     )
+
+
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_if_not_admin(update):
+        return
+    await update.message.reply_text(
+        "Меню обновлено 👇",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_if_not_admin(update):
+        return
+    async with async_session_factory() as session:
+        text = await build_dashboard_text(session)
+    await _reply_html(update, text)
+
+
+async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_if_not_admin(update):
+        return
+    async with async_session_factory() as session:
+        text = await build_digest_text(session)
+    await _reply_html(update, text)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -130,7 +209,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             await session.scalars(select(Source).where(Source.is_active.is_(True)))
         ).all()
         if not sources:
-            await update.message.reply_text("No active sources.")
+            await _reply_html(update, "No active sources.")
             return
         lines = ["<b>Active sources</b>"]
         for s in sources:
@@ -146,7 +225,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"• <b>{s.name}</b> ({s.scraper_module})\n"
                 f"  last OK: {last} | predictions: {pred_count or 0}"
             )
-        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        await _reply_html(update, "\n".join(lines))
 
 
 async def cmd_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -161,7 +240,7 @@ async def cmd_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"{flag} id={s.id} <b>{s.name}</b> module=<code>{s.scraper_module}</code> "
                 f"lang={s.language} geo={s.geo or '-'}"
             )
-        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        await _reply_html(update, "\n".join(lines))
 
 
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -186,44 +265,58 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"structure={hc.html_structure_ok} "
                 f"at {hc.checked_at.strftime('%m-%d %H:%M') if hc.checked_at else '-'}"
             )
-        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        await _reply_html(update, "\n".join(lines))
+
+
+def _parse_logs_args(args: list[str]) -> tuple[int, str | None, bool]:
+    limit = 10
+    module: str | None = None
+    errors_only = False
+    for arg in args:
+        low = arg.lower()
+        if low == "errors":
+            errors_only = True
+        elif low.isdigit():
+            limit = min(int(low), 50)
+        else:
+            module = arg
+    return limit, module, errors_only
 
 
 async def cmd_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _deny_if_not_admin(update):
         return
-    n = 10
+    limit, module, errors_only = _parse_logs_args(context.args or [])
+    async with async_session_factory() as session:
+        text = await build_logs_text(
+            session, limit=limit, module=module, errors_only=errors_only
+        )
+    await _reply_html(update, text)
+
+
+async def cmd_loginfo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_if_not_admin(update):
+        return
+    await _reply_html(update, build_log_info_text())
+
+
+async def cmd_logtail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_if_not_admin(update):
+        return
+    n = 40
     if context.args:
         try:
-            n = min(int(context.args[0]), 50)
+            n = int(context.args[0])
         except ValueError:
             pass
-    async with async_session_factory() as session:
-        logs = (
-            await session.scalars(
-                select(ScrapeLog).order_by(ScrapeLog.started_at.desc()).limit(n)
-            )
-        ).all()
-        source_map = {
-            s.id: s.name
-            for s in (await session.scalars(select(Source))).all()
-        }
-        lines = [f"<b>Last {len(logs)} scrape logs</b>"]
-        for lg in logs:
-            name = source_map.get(lg.source_id, "?")
-            err = f" — {lg.error_msg[:80]}" if lg.error_msg else ""
-            lines.append(
-                f"• {lg.started_at.strftime('%m-%d %H:%M') if lg.started_at else '?'} "
-                f"<b>{name}</b> [{lg.status}] +{lg.items_new}/{lg.items_found}{err}"
-            )
-        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await _reply_html(update, read_log_tail(lines_count=n))
 
 
 async def cmd_match(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _deny_if_not_admin(update):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /match <slug>")
+        await _reply_html(update, "Usage: /match &lt;slug&gt;")
         return
     slug = context.args[0]
     async with async_session_factory() as session:
@@ -233,24 +326,29 @@ async def cmd_match(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             .options(selectinload(Match.predictions))
         )
         if not match:
-            await update.message.reply_text("Match not found.")
+            await _reply_html(update, "Match not found.")
             return
         ai_status = "ready" if match.ai_summary else "pending"
         if needs_ai(match):
             ai_status = "needs generation"
         text = (
             f"<b>{match.team_home} vs {match.team_away}</b>\n"
-            f"slug: <code>{match.slug}</code>\n"
+            f"id: {match.id} | slug: <code>{match.slug}</code>\n"
             f"sport: {match.sport or '-'} | predictions: {match.predictions_count}\n"
             f"AI: {ai_status}\n"
         )
         if match.ai_top_pick:
             text += f"top pick: {match.ai_top_pick}\n"
-        await update.message.reply_text(text, parse_mode="HTML")
+        if match.ai_summary:
+            summary = match.ai_summary[:500]
+            if len(match.ai_summary) > 500:
+                summary += "…"
+            text += f"\n{summary}"
+        await _reply_html(update, text)
 
 
 async def _run_bg(coro, update: Update, started_msg: str) -> None:
-    await update.message.reply_text(started_msg)
+    await update.message.reply_text(started_msg, reply_markup=main_menu_keyboard())
 
     async def wrapper():
         try:
@@ -267,15 +365,26 @@ async def cmd_scrape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if await _deny_if_not_admin(update):
         return
     module = context.args[0] if context.args else None
-    label = module or "all sources"
-    await _run_bg(run_scrape(source_name=module), update, f"Scrape started: {label}")
+    label = module or "all active sources"
+    await _run_bg(run_scrape(source_name=module), update, f"Scrape: {label}")
 
 
 async def cmd_diagnose(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _deny_if_not_admin(update):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /diagnose <scraper_module>")
+        async with async_session_factory() as session:
+            sources = (
+                await session.scalars(
+                    select(Source).where(Source.is_active.is_(True))
+                )
+            ).all()
+        await update.message.reply_text(
+            "Выберите источник:",
+            reply_markup=sources_inline_keyboard(
+                list(sources), prefix="menu:diagnose", show_all=False
+            ),
+        )
         return
     module = context.args[0]
 
@@ -302,13 +411,118 @@ async def cmd_diagnose(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await _run_bg(job(), update, f"Diagnose: {module}")
 
 
+async def cmd_health_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_if_not_admin(update):
+        return
+    module = context.args[0] if context.args else None
+    label = module or "all active"
+    await _run_bg(run_health_checks(module), update, f"Health check: {label}")
+
+
+async def cmd_repair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_if_not_admin(update):
+        return
+
+    async def job():
+        from src.db.repair_catalog import run_repair_catalog
+
+        stats = await run_repair_catalog()
+        await send_message(f"<b>Repair catalog done</b>\n<code>{stats}</code>")
+
+    await _run_bg(job(), update, "Repair catalog")
+
+
+async def cmd_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_if_not_admin(update):
+        return
+
+    if context.args:
+        arg = context.args[0]
+        if arg.isdigit():
+            match_id = int(arg)
+
+            async def job():
+                async with async_session_factory() as session:
+                    ok = await generate_for_match(session, match_id, force=True)
+                if ok:
+                    await send_message(f"✅ AI generated for match {match_id}")
+                else:
+                    await send_message(f"⚠️ AI skipped for match {match_id}")
+
+            await _run_bg(job(), update, f"AI summary: match {match_id}")
+            return
+
+    async with async_session_factory() as session:
+        ids = await _matches_needing_ai(session)
+        if not ids:
+            await _reply_html(update, "✅ All matches with 2+ predictions have up-to-date AI.")
+            return
+        matches = (
+            await session.scalars(
+                select(Match).where(Match.id.in_(ids[:10])).order_by(Match.match_date.desc())
+            )
+        ).all()
+        lines = [f"<b>AI queue</b> ({len(ids)} total, top 10):"]
+        for m in matches:
+            lines.append(
+                f"• {m.id}: <b>{m.team_home} vs {m.team_away}</b> "
+                f"({m.predictions_count} preds)"
+            )
+        lines.append("\nTap a match or: /ai &lt;match_id&gt;")
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=ai_matches_keyboard(list(matches)),
+        )
+
+
+async def menu_message_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if await _deny_if_not_admin(update):
+        return
+    text = (update.message.text or "").strip()
+    if text not in MENU_BUTTONS:
+        return
+
+    if text == MENU_DASHBOARD:
+        await cmd_dashboard(update, context)
+    elif text == MENU_SOURCES:
+        await cmd_sources(update, context)
+    elif text == MENU_LOGS:
+        context.args = ["10"]
+        await cmd_logs(update, context)
+    elif text == MENU_DIAGNOSE:
+        context.args = []
+        await cmd_diagnose(update, context)
+    elif text == MENU_SCRAPE:
+        async with async_session_factory() as session:
+            sources = (
+                await session.scalars(
+                    select(Source).where(Source.is_active.is_(True))
+                )
+            ).all()
+        await update.message.reply_text(
+            "Запустить парсинг:",
+            reply_markup=sources_inline_keyboard(list(sources), prefix="menu:scrape"),
+        )
+    elif text == MENU_AI:
+        context.args = []
+        await cmd_ai(update, context)
+    elif text == MENU_SERVICE:
+        await update.message.reply_text(
+            "Сервисные действия:",
+            reply_markup=service_inline_keyboard(),
+        )
+    elif text == MENU_HELP:
+        await cmd_start(update, context)
+
+
 async def add_source_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny_if_not_admin(update):
         return ConversationHandler.END
     context.user_data.clear()
-    await update.message.reply_text(
-        "Enter base URL (e.g. https://example.com):"
-    )
+    await update.message.reply_text("Enter base URL (e.g. https://example.com):")
     return ASK_BASE_URL
 
 
@@ -375,27 +589,23 @@ async def add_source_geo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"Source added (is_active=false).\n"
         f"• id: {source_id}\n"
         f"• module: <code>{module_name}</code>\n\n"
-        f"Next steps:\n"
-        f"1. Copy <code>src/scraper/sources/_template.py</code> → "
-        f"<code>src/scraper/sources/{module_name}.py</code>\n"
-        f"2. Register in <code>sources/__init__.py</code>\n"
-        f"3. /diagnose {module_name}\n"
-        f"4. /scrape {module_name}",
+        f"Next: /diagnose {module_name} → /scrape {module_name}",
         parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
     )
     return ConversationHandler.END
 
 
 async def add_source_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Cancelled.")
+    await update.message.reply_text("Cancelled.", reply_markup=main_menu_keyboard())
     return ConversationHandler.END
 
 
-async def _edit_retry_result(query, text: str) -> None:
+async def _edit_retry_result(query, text: str, *, parse_mode: str | None = None) -> None:
     try:
-        await query.edit_message_text(text)
+        await query.edit_message_text(text, parse_mode=parse_mode)
     except Exception:
-        log.warning("Could not edit retry message, sending new one")
+        log.warning("Could not edit message, sending new one")
         await send_message(text)
 
 
@@ -448,9 +658,7 @@ async def _retry_scrape_task(
             return
         if scrape_log.status == "error":
             err = (scrape_log.error_msg or "unknown")[:400]
-            await _edit_retry_result(
-                query, f"❌ Retry failed: {source_name}\n{err}"
-            )
+            await _edit_retry_result(query, f"❌ Retry failed: {source_name}\n{err}")
         elif scrape_log.items_found == 0:
             await _edit_retry_result(
                 query, f"⚠️ Retry partial: {source_name} (no articles found)"
@@ -466,6 +674,102 @@ async def _retry_scrape_task(
         await _edit_retry_result(query, f"❌ Retry error: {source_name}\n{e}")
 
 
+async def _menu_callback(query, data: str) -> None:
+    """menu:scrape:mod | menu:diagnose:mod | menu:ai:id | menu:service:action"""
+    parts = data.split(":")
+    if len(parts) < 3:
+        return
+    _, section, arg = parts[0], parts[1], ":".join(parts[2:])
+
+    if section == "scrape":
+        label = arg if arg != "all" else "all active"
+        await query.edit_message_text(f"⏳ Scrape started: {label}…")
+
+        async def job():
+            try:
+                await run_scrape(source_name=None if arg == "all" else arg)
+                await send_message(f"✅ Scrape done: {label}")
+            except Exception as e:
+                await send_message(f"❌ Scrape failed: {label}\n{e}")
+
+        asyncio.create_task(job())
+
+    elif section == "diagnose":
+        async with async_session_factory() as session:
+            source = await session.scalar(
+                select(Source).where(Source.scraper_module == arg)
+            )
+        if not source:
+            await query.edit_message_text(f"Source not found: {arg}")
+            return
+        await query.edit_message_text(f"⏳ Diagnose: {source.name}…")
+        asyncio.create_task(_diagnose_task(query, source=source))
+
+    elif section == "ai":
+        try:
+            match_id = int(arg)
+        except ValueError:
+            return
+        await query.edit_message_text(f"⏳ AI summary for match {match_id}…")
+
+        async def ai_job():
+            try:
+                async with async_session_factory() as session:
+                    ok = await generate_for_match(session, match_id, force=True)
+                if ok:
+                    await _edit_retry_result(
+                        query, f"✅ AI generated for match {match_id}"
+                    )
+                else:
+                    await _edit_retry_result(
+                        query, f"⚠️ AI skipped for match {match_id}"
+                    )
+            except Exception as e:
+                await _edit_retry_result(query, f"❌ AI failed: {e}")
+
+        asyncio.create_task(ai_job())
+
+    elif section == "service":
+        if arg == "health":
+            await query.edit_message_text("⏳ Health check running…")
+
+            async def hjob():
+                try:
+                    n = await run_health_checks()
+                    await send_message(f"✅ Health check done ({n} sources)")
+                except Exception as e:
+                    await send_message(f"❌ Health check failed: {e}")
+
+            asyncio.create_task(hjob())
+
+        elif arg == "repair":
+            await query.edit_message_text("⏳ Repair catalog running…")
+
+            async def rjob():
+                try:
+                    from src.db.repair_catalog import run_repair_catalog
+
+                    stats = await run_repair_catalog()
+                    await send_message(f"✅ Repair done\n<code>{stats}</code>")
+                except Exception as e:
+                    await send_message(f"❌ Repair failed: {e}")
+
+            asyncio.create_task(rjob())
+
+        elif arg == "loginfo":
+            await query.edit_message_text(build_log_info_text(), parse_mode="HTML")
+
+        elif arg == "logtail":
+            text = read_log_tail(lines_count=40)
+            for part in split_telegram_messages(text):
+                await send_message(part)
+
+        elif arg == "digest":
+            async with async_session_factory() as session:
+                text = await build_digest_text(session)
+            await query.edit_message_text(text, parse_mode="HTML")
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -474,6 +778,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     data = query.data or ""
+
+    if data.startswith("menu:"):
+        await _menu_callback(query, data)
+        return
+
     if ":" not in data:
         return
     action, sid_raw = data.split(":", 1)
@@ -556,9 +865,15 @@ def build_app() -> Application:
     conv = ConversationHandler(
         entry_points=[CommandHandler("add_source", add_source_start)],
         states={
-            ASK_BASE_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_base_url)],
-            ASK_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_category)],
-            ASK_LANGUAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_language)],
+            ASK_BASE_URL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_base_url)
+            ],
+            ASK_CATEGORY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_category)
+            ],
+            ASK_LANGUAGE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_language)
+            ],
             ASK_GEO: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_geo)],
         },
         fallbacks=[CommandHandler("cancel", add_source_cancel)],
@@ -567,15 +882,31 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("whoami", cmd_whoami))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_start))
+    app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(CommandHandler("dashboard", cmd_dashboard))
+    app.add_handler(CommandHandler("digest", cmd_digest))
     app.add_error_handler(_on_error)
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("sources", cmd_sources))
     app.add_handler(CommandHandler("health", cmd_health))
+    app.add_handler(CommandHandler("health_run", cmd_health_run))
     app.add_handler(CommandHandler("logs", cmd_logs))
+    app.add_handler(CommandHandler("loginfo", cmd_loginfo))
+    app.add_handler(CommandHandler("logtail", cmd_logtail))
+    app.add_handler(CommandHandler("repair", cmd_repair))
     app.add_handler(CommandHandler("match", cmd_match))
     app.add_handler(CommandHandler("scrape", cmd_scrape))
     app.add_handler(CommandHandler("diagnose", cmd_diagnose))
+    app.add_handler(CommandHandler("ai", cmd_ai))
     app.add_handler(conv)
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.Regex(
+                "^(" + "|".join(re.escape(b) for b in MENU_BUTTONS) + ")$"
+            ),
+            menu_message_handler,
+        )
+    )
     app.add_handler(CallbackQueryHandler(callback_handler))
     return app
 

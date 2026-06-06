@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     telegram_alert_snooze_hours: int = int(
         _telegram.get("alert_snooze_hours", fallback=6)
     )
+    telegram_morning_digest_enabled: bool = _telegram.getboolean(
+        "morning_digest_enabled", fallback=True
+    )
 
 
 settings = Settings()
