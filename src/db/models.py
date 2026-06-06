@@ -44,6 +44,24 @@ class Source(Base):
     predictions: Mapped[List["Prediction"]] = relationship(back_populates="source")
     scrape_logs: Mapped[List["ScrapeLog"]] = relationship(back_populates="source")
     health_checks: Mapped[List["HealthCheck"]] = relationship(back_populates="source")
+    alert_states: Mapped[List["SourceAlertState"]] = relationship(
+        back_populates="source"
+    )
+
+
+class SourceAlertState(Base):
+    """Дедуп и snooze Telegram-алертов по источнику."""
+
+    __tablename__ = "source_alert_states"
+
+    source_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sources.id", ondelete="CASCADE"), primary_key=True
+    )
+    alert_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+    last_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    snoozed_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    source: Mapped["Source"] = relationship(back_populates="alert_states")
 
 
 class Team(Base):

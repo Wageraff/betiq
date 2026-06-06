@@ -30,6 +30,7 @@ from src.db.models import HealthCheck, Match, Prediction, ScrapeLog, Source
 from src.db.session import async_session_factory
 from src.scraper.diagnose import diagnose_source
 from src.scraper.engine import run_scrape, run_scrape_source
+from src.scraper.utils.alert_cooldown import snooze_source
 from src.scraper.utils.alerter import send_message
 from src.scraper.utils.browser import browser_lifecycle
 
@@ -116,7 +117,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/diagnose [module] — Cloudflare test\n"
         "/match [slug] — match info\n"
         "/add_source — add new source\n"
-        "/whoami — your chat_id for .env"
+        "/whoami — your chat_id for .env\n\n"
+        "Alert buttons: Retry, Diagnose, Logs, Snooze, Disable/Enable"
     )
 
 
@@ -397,6 +399,42 @@ async def _edit_retry_result(query, text: str) -> None:
         await send_message(text)
 
 
+def _format_scrape_logs(logs: list[ScrapeLog], source_name: str) -> str:
+    if not logs:
+        return f"<b>{source_name}</b>: no scrape logs yet."
+    lines = [f"<b>Last {len(logs)} logs: {source_name}</b>"]
+    for lg in logs:
+        err = f"\n  {lg.error_msg[:120]}" if lg.error_msg else ""
+        ts = lg.started_at.strftime("%m-%d %H:%M") if lg.started_at else "?"
+        lines.append(
+            f"• {ts} [{lg.status}] +{lg.items_new}/{lg.items_found}{err}"
+        )
+    return "\n".join(lines)
+
+
+async def _diagnose_task(query, *, source: Source) -> None:
+    try:
+        async with browser_lifecycle():
+            async with async_session_factory() as session:
+                src = await session.get(Source, source.id)
+                if not src or not src.scraper_module:
+                    await _edit_retry_result(query, f"❌ Source not found: {source.name}")
+                    return
+                results = await diagnose_source(src)
+                lines = [f"<b>Diagnose: {src.name}</b>"]
+                for r in results:
+                    ok = "✅" if r.get("ok") else "❌"
+                    lines.append(
+                        f"{ok} {r.get('label')}\n"
+                        f"HTTP {r.get('status')} | CF={r.get('cloudflare')}\n"
+                        f"H1: {r.get('h1', '')[:60]}"
+                    )
+                await _edit_retry_result(query, "\n".join(lines))
+    except Exception as e:
+        log.exception("Diagnose callback failed for %s", source.name)
+        await _edit_retry_result(query, f"❌ Diagnose error: {source.name}\n{e}")
+
+
 async def _retry_scrape_task(
     query,
     *,
@@ -436,14 +474,20 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     data = query.data or ""
+    if ":" not in data:
+        return
+    action, sid_raw = data.split(":", 1)
+    try:
+        sid = int(sid_raw)
+    except ValueError:
+        return
+
     async with async_session_factory() as session:
-        if data.startswith("scrape_retry:"):
-            sid = int(data.split(":")[1])
-            source = await session.get(Source, sid)
+        source = await session.get(Source, sid)
+
+        if action == "scrape_retry":
             if source and source.scraper_module:
-                await query.edit_message_text(
-                    f"⏳ Retrying scrape: {source.name}…"
-                )
+                await query.edit_message_text(f"⏳ Retrying scrape: {source.name}…")
                 asyncio.create_task(
                     _retry_scrape_task(
                         query,
@@ -451,13 +495,51 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         source_name=source.name,
                     )
                 )
-        elif data.startswith("source_disable:"):
-            sid = int(data.split(":")[1])
-            source = await session.get(Source, sid)
+
+        elif action == "scrape_diagnose":
+            if source:
+                await query.edit_message_text(f"⏳ Diagnose: {source.name}…")
+                asyncio.create_task(_diagnose_task(query, source=source))
+
+        elif action == "scrape_logs":
+            if source:
+                logs = (
+                    await session.scalars(
+                        select(ScrapeLog)
+                        .where(ScrapeLog.source_id == source.id)
+                        .order_by(ScrapeLog.started_at.desc())
+                        .limit(5)
+                    )
+                ).all()
+                text = _format_scrape_logs(list(logs), source.name)
+                await query.edit_message_text(text, parse_mode="HTML")
+
+        elif action == "source_snooze":
+            if source:
+                until = await snooze_source(session, source.id)
+                until_s = until.strftime("%Y-%m-%d %H:%M UTC")
+                await query.edit_message_text(
+                    f"🔕 Alerts snoozed for <b>{source.name}</b> until {until_s}",
+                    parse_mode="HTML",
+                )
+
+        elif action == "source_disable":
             if source:
                 source.is_active = False
                 await session.commit()
-                await query.edit_message_text(f"Source {source.name} disabled.")
+                await query.edit_message_text(
+                    f"⏸ Source <b>{source.name}</b> disabled.",
+                    parse_mode="HTML",
+                )
+
+        elif action == "source_enable":
+            if source:
+                source.is_active = True
+                await session.commit()
+                await query.edit_message_text(
+                    f"✅ Source <b>{source.name}</b> enabled.",
+                    parse_mode="HTML",
+                )
 
 
 def build_app() -> Application:

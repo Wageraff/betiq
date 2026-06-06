@@ -29,6 +29,7 @@ def _parse_csv(value: str) -> list[str]:
 _proxy_sessions = _cfg["proxy_sessions"] if _cfg.has_section("proxy_sessions") else {}
 _datetime = _cfg["datetime"] if _cfg.has_section("datetime") else {}
 _logging = _cfg["logging"] if _cfg.has_section("logging") else {}
+_telegram = _cfg["telegram"] if _cfg.has_section("telegram") else {}
 _ai = _cfg["ai"] if _cfg.has_section("ai") else {}
 
 
@@ -98,6 +99,13 @@ class Settings(BaseSettings):
 
     log_level: str = _logging.get("level", fallback="INFO")
     log_file: str = str(BASE_DIR / _logging.get("file", fallback="logs/app.log"))
+
+    telegram_alert_dedup_hours: int = int(
+        _telegram.get("alert_dedup_hours", fallback=24)
+    )
+    telegram_alert_snooze_hours: int = int(
+        _telegram.get("alert_snooze_hours", fallback=6)
+    )
 
 
 settings = Settings()
