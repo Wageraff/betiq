@@ -4,7 +4,7 @@ import { api, ApiSyncStatus } from "../api";
 const SYNC_ACTIONS: { id: string; label: string; hint: string }[] = [
   { id: "link", label: "Link matches", hint: "API-Football + Odds API" },
   { id: "leagues", label: "Sync leagues", hint: "competitions" },
-  { id: "odds", label: "Fetch odds", hint: "football bulk" },
+  { id: "odds", label: "Fetch odds", hint: "The Odds API + API-Football /odds" },
   { id: "form", label: "Team form", hint: "48h window" },
   { id: "lineups", label: "Lineups", hint: "< 2h to kickoff" },
   { id: "stats", label: "Post-match stats", hint: "FT only" },
@@ -146,7 +146,13 @@ export default function ApiPage() {
             <tbody>
               {Object.entries(counts).map(([k, v]) => (
                 <tr key={k}>
-                  <td>{k}</td>
+                  <td>
+                    {k === "match_odds_api_football"
+                      ? "match_odds (API-Football)"
+                      : k === "match_odds_the_odds_api"
+                        ? "match_odds (The Odds API)"
+                        : k}
+                  </td>
                   <td>{v.toLocaleString()}</td>
                 </tr>
               ))}

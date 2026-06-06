@@ -131,6 +131,7 @@ class AdminMatchStatsOut(BaseModel):
 
 
 class AdminMatchOddsOut(BaseModel):
+    provider: str = "the_odds_api"
     bookmaker: str
     market: str
     outcome: str

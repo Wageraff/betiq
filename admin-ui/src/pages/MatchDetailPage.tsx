@@ -57,10 +57,49 @@ function PredictionCard({ p }: { p: PredictionDetail }) {
   );
 }
 
+function OddsTable({ rows, title }: { rows: MatchApiData["odds"]; title: string }) {
+  if (rows.length === 0) return null;
+  return (
+    <>
+      <h4>{title} ({rows.length})</h4>
+      <div style={{ overflowX: "auto", maxHeight: 280, overflowY: "auto" }}>
+        <table className="compact-table">
+          <thead>
+            <tr>
+              <th>Bookmaker</th>
+              <th>Market</th>
+              <th>Outcome</th>
+              <th>Odds</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 80).map((o, i) => (
+              <tr key={i}>
+                <td>{o.bookmaker}</td>
+                <td>{o.market}</td>
+                <td>{o.outcome}{o.point != null ? ` (${o.point})` : ""}</td>
+                <td>{o.odds}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: string; away: string }) {
+  const oddsAf = ad.odds.filter((o) => o.provider === "api_football");
+  const oddsToa = ad.odds.filter((o) => o.provider !== "api_football");
+  const hasAfLink = ad.external_ids.some((e) => e.provider === "api_football");
+
   return (
     <section className="panel">
       <h3>Sport API data</h3>
+      <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: 0 }}>
+        Коэффициенты — ниже в блоках The Odds API (h2h, btts, …) и API-Football (Match Winner, Over/Under, …).
+        Загрузка: Sport API → Fetch odds.
+      </p>
       <div className="match-meta" style={{ marginBottom: "1rem" }}>
         {ad.status && <span>Status: {ad.status}</span>}
         {ad.score && <span>Score: {ad.score}</span>}
@@ -159,32 +198,13 @@ function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: stri
         </div>
       )}
 
-      {ad.odds.length > 0 && (
-        <>
-          <h4>Odds ({ad.odds.length})</h4>
-          <div style={{ overflowX: "auto", maxHeight: 280, overflowY: "auto" }}>
-            <table className="compact-table">
-              <thead>
-                <tr>
-                  <th>Bookmaker</th>
-                  <th>Market</th>
-                  <th>Outcome</th>
-                  <th>Odds</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ad.odds.slice(0, 80).map((o, i) => (
-                  <tr key={i}>
-                    <td>{o.bookmaker}</td>
-                    <td>{o.market}</td>
-                    <td>{o.outcome}{o.point != null ? ` (${o.point})` : ""}</td>
-                    <td>{o.odds}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+      <OddsTable rows={oddsToa} title="The Odds API" />
+      <OddsTable rows={oddsAf} title="API-Football" />
+      {hasAfLink && oddsAf.length === 0 && oddsToa.length > 0 && (
+        <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+          API-Football: fixture связан, но prematch odds пока пусто (лимит тарифа или линия ещё не открыта).
+          Проверьте лог после Fetch odds.
+        </p>
       )}
 
       {ad.odds_history.length > 0 && (

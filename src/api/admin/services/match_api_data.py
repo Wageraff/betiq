@@ -4,6 +4,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api_clients.odds import odds_provider_for_market
 from src.db.models import (
     Match,
     MatchExternalId,
@@ -101,6 +102,7 @@ async def load_match_api_bundle(session: AsyncSession, match: Match) -> dict:
     ).all()
     odds_rows = [
         {
+            "provider": odds_provider_for_market(o.market),
             "bookmaker": o.bookmaker,
             "market": o.market,
             "outcome": o.outcome,

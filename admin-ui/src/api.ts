@@ -104,6 +104,7 @@ export type MatchStatsRow = {
 };
 
 export type MatchOddsRow = {
+  provider?: string;
   bookmaker: string;
   market: string;
   outcome: string;

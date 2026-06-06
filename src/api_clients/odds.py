@@ -15,6 +15,34 @@ log = logging.getLogger("odds_sync")
 MOVEMENT_THRESHOLD_PCT = 5.0
 SIGNIFICANT_THRESHOLD_PCT = 10.0
 
+THE_ODDS_API_MARKET_KEYS = frozenset(
+    {
+        "h2h",
+        "spreads",
+        "totals",
+        "outrights",
+        "btts",
+        "draw_no_bet",
+        "h2h_3_way",
+        "h2h_lay",
+        "outrights_lay",
+        "team_totals",
+        "alternate_team_totals",
+        "double_chance",
+    }
+)
+
+
+def odds_provider_for_market(market: str) -> str:
+    """Источник строки в match_odds по ключу/названию рынка."""
+    key = (market or "").strip().lower().replace(" ", "_")
+    if (
+        key in THE_ODDS_API_MARKET_KEYS
+        or key.startswith(("alternate_", "player_", "batter_"))
+    ):
+        return "the_odds_api"
+    return "api_football"
+
 
 async def _get_current_odds(
     session: AsyncSession,

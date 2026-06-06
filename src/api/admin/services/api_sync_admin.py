@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.api_football import ApiFootballClient
+from src.api_clients.odds import odds_provider_for_market
 from src.api_clients.the_odds_api import TheOddsApiClient
 from src.config import settings
 from src.db.models import (
@@ -79,11 +80,17 @@ async def fetch_db_counts(session: AsyncSession) -> dict[str, int]:
         )
         or 0
     )
+    odds_rows = (await session.scalars(select(MatchOdds.market))).all()
+    odds_af = sum(1 for m in odds_rows if odds_provider_for_market(m) == "api_football")
+    odds_toa = len(odds_rows) - odds_af
+
     return {
         "competitions": await _count(Competition),
         "match_links_api_football": af_links,
         "match_links_the_odds_api": odds_links,
         "match_odds": await _count(MatchOdds),
+        "match_odds_api_football": odds_af,
+        "match_odds_the_odds_api": odds_toa,
         "odds_history": await _count(OddsHistory),
         "match_stats": await _count(MatchStats),
         "team_form": await _count(TeamForm),

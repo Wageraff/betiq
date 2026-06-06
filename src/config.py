@@ -122,6 +122,12 @@ class Settings(BaseSettings):
     api_football_odds_enabled: bool = _api_sync.getboolean(
         "api_football_odds_enabled", fallback=True
     )
+    api_football_odds_days_ahead: int = int(
+        _api_sync.get("api_football_odds_days_ahead", fallback=365)
+    )
+    api_football_odds_batch_size: int = int(
+        _api_sync.get("api_football_odds_batch_size", fallback=50)
+    )
     api_fixture_refresh_limit: int = int(
         _api_sync.get("fixture_refresh_limit", fallback=80)
     )
