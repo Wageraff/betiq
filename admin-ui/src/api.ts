@@ -27,6 +27,24 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
 
+  download: async (path: string, filename: string) => {
+    const key = localStorage.getItem("admin_key") || "";
+    const res = await fetch(`${API}${path}`, {
+      headers: { "X-Admin-Key": key },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
   uploadLogo: async (teamId: number, file: File) => {
     const fd = new FormData();
     fd.append("file", file);

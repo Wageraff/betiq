@@ -117,8 +117,15 @@ class AdminAiMatchBrief(BaseModel):
     match_date: Optional[datetime] = None
     predictions_count: int
     has_ai: bool
+    ai_summary: Optional[str] = None
+    ai_top_pick: Optional[str] = None
     ai_confidence: Optional[str] = None
     ai_generated_at: Optional[datetime] = None
+
+
+class AdminAiUpdate(BaseModel):
+    ai_summary: Optional[str] = None
+    ai_top_pick: Optional[str] = None
 
 
 class SourceStatsOut(BaseModel):
@@ -183,3 +190,17 @@ class ActionResponse(BaseModel):
 
 class ActionLogOut(BaseModel):
     lines: list[str]
+
+
+class AppLogInfoOut(BaseModel):
+    path: str
+    exists: bool
+    size_bytes: int = 0
+    size_human: str = "0 B"
+    modified_at: Optional[datetime] = None
+
+
+class AppLogClearOut(BaseModel):
+    ok: bool
+    path: str
+    bytes_cleared: int = 0

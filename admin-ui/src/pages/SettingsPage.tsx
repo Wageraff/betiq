@@ -36,17 +36,37 @@ function healthTitle(s: Source): string {
   return parts.join(" · ");
 }
 
+type AppLogInfo = {
+  path: string;
+  exists: boolean;
+  size_bytes: number;
+  size_human: string;
+  modified_at: string | null;
+};
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [appLog, setAppLog] = useState<AppLogInfo | null>(null);
   const [jobId, setJobId] = useState("");
   const [log, setLog] = useState<string[]>([]);
   const [source, setSource] = useState("beturi");
   const [error, setError] = useState("");
+  const [logBusy, setLogBusy] = useState(false);
+
+  const loadLogInfo = async () => {
+    try {
+      const data = await api.get<AppLogInfo>("/settings/logs");
+      setAppLog(data);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const load = async () => {
     try {
       const data = await api.get<Settings>("/settings");
       setSettings(data);
+      await loadLogInfo();
     } catch (e) {
       setError(String(e));
     }
@@ -98,6 +118,38 @@ export default function SettingsPage() {
   const toggleSource = async (id: number, active: boolean) => {
     await api.patch(`/settings/sources/${id}`, { is_active: active });
     load();
+  };
+
+  const downloadLogs = async () => {
+    setLogBusy(true);
+    setError("");
+    try {
+      await api.download("/settings/logs/download", "app.log");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLogBusy(false);
+    }
+  };
+
+  const clearLogs = async () => {
+    if (
+      !window.confirm(
+        "Очистить app.log? Текущее содержимое будет удалено без возможности восстановления."
+      )
+    ) {
+      return;
+    }
+    setLogBusy(true);
+    setError("");
+    try {
+      await api.post("/settings/logs/clear");
+      await loadLogInfo();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLogBusy(false);
+    }
   };
 
   if (!settings) return <p>Загрузка…</p>;
@@ -222,6 +274,50 @@ export default function SettingsPage() {
         <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
           Перед парсингом остановите scheduler на сервере, чтобы не было конфликта.
         </p>
+      </div>
+
+      <div className="panel">
+        <h3>Логи приложения</h3>
+        {appLog ? (
+          <>
+            <p style={{ marginTop: 0 }}>
+              <code>{appLog.path}</code>
+            </p>
+            <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: 0 }}>
+              Размер:{" "}
+              <strong style={{ color: "var(--text)" }}>
+                {appLog.exists ? appLog.size_human : "файл не найден"}
+              </strong>
+              {appLog.exists && appLog.size_bytes > 0 && (
+                <span> ({appLog.size_bytes.toLocaleString("ru-RU")} байт)</span>
+              )}
+              {appLog.modified_at && (
+                <span> · изменён {fmtDt(appLog.modified_at)}</span>
+              )}
+            </p>
+            <div className="filters">
+              <button disabled={logBusy || !appLog.exists} onClick={downloadLogs}>
+                Скачать логи
+              </button>
+              <button
+                className="secondary"
+                disabled={logBusy || !appLog.exists || appLog.size_bytes === 0}
+                onClick={clearLogs}
+              >
+                Очистить файл
+              </button>
+              <button className="secondary" disabled={logBusy} onClick={loadLogInfo}>
+                Обновить
+              </button>
+            </div>
+            <p style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
+              Путь из <code>config.ini</code> → [logging] file. Scheduler и API пишут в
+              один файл; после очистки новые записи продолжат писаться.
+            </p>
+          </>
+        ) : (
+          <p style={{ color: "var(--muted)" }}>Загрузка информации о логах…</p>
+        )}
       </div>
 
       <div className="panel">

@@ -211,6 +211,46 @@ th {
   white-space: nowrap;
 }
 
+.ai-table {
+  font-size: 0.85rem;
+}
+
+.ai-table .ai-pick-cell {
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.ai-table .ai-preview-cell {
+  max-width: 280px;
+  color: var(--muted);
+}
+
+.ai-table .ai-actions-cell {
+  white-space: nowrap;
+}
+
+.ai-edit-row td {
+  background: #0d1117;
+  padding: 1rem 0.65rem;
+}
+
+.ai-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ai-edit-form label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.ai-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .error {
   color: #f87171;
   margin: 0.5rem 0;

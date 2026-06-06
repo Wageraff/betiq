@@ -4,11 +4,15 @@ from __future__ import annotations
 import configparser
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.deps import require_admin
+from src.api.admin.app_log import app_log_info, clear_app_log, resolve_app_log_path
 from src.api.admin.schemas import (
+    AppLogClearOut,
+    AppLogInfoOut,
     ConfigSectionOut,
     SettingsOut,
     SourceOut,
@@ -131,3 +135,27 @@ async def update_source(
         tier=tier_for_module(source.scraper_module).value,
         stats=stats,
     )
+
+
+@router.get("/logs", response_model=AppLogInfoOut)
+async def get_app_log_info(_: None = Depends(require_admin)):
+    return AppLogInfoOut(**app_log_info())
+
+
+@router.get("/logs/download")
+async def download_app_log(_: None = Depends(require_admin)):
+    path = resolve_app_log_path()
+    if not path.is_file():
+        raise HTTPException(404, "Log file not found")
+    return FileResponse(
+        path,
+        media_type="text/plain; charset=utf-8",
+        filename=path.name,
+    )
+
+
+@router.post("/logs/clear", response_model=AppLogClearOut)
+async def clear_app_log_file(_: None = Depends(require_admin)):
+    path = resolve_app_log_path()
+    cleared = clear_app_log()
+    return AppLogClearOut(ok=True, path=str(path), bytes_cleared=cleared)
