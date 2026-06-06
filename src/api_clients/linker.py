@@ -11,8 +11,8 @@ from src.api_clients.constants import (
     API_FOOTBALL_SPORTS,
     PROVIDER_API_FOOTBALL,
     PROVIDER_THE_ODDS_API,
-    SPORT_TO_ODDS_KEY,
 )
+from src.api_clients.odds_keys import odds_sport_keys_for_match
 from src.api_clients.external_ids import (
     get_team_external_id,
     save_match_external_id,
@@ -162,42 +162,42 @@ async def link_match_to_odds_api(
 ) -> bool:
     if not match.match_date or not match.sport:
         return False
-    sport_key = SPORT_TO_ODDS_KEY.get(match.sport)
-    if not sport_key:
+    sport_keys = await odds_sport_keys_for_match(session, match)
+    if not sport_keys:
         return False
     client = client or TheOddsApiClient()
     if not client.enabled:
         return False
 
     cache = events_by_sport if events_by_sport is not None else {}
-    if sport_key not in cache:
-        cache[sport_key] = await client.get_events(sport_key)
-    events = cache[sport_key]
-    for event in events:
-        commence = _parse_commence(event.get("commence_time", ""))
-        if not commence:
-            continue
-        delta = abs((commence - match.match_date).total_seconds())
-        if delta > 10800:
-            continue
-        if await event_matches_teams(
-            session,
-            event_home=event.get("home_team", ""),
-            event_away=event.get("away_team", ""),
-            home_id=match.team_home_id,
-            home_name=match.team_home,
-            away_id=match.team_away_id,
-            away_name=match.team_away,
-            sport=match.sport,
-        ):
-            await save_match_external_id(
+    for sport_key in sport_keys:
+        if sport_key not in cache:
+            cache[sport_key] = await client.get_events(sport_key)
+        for event in cache[sport_key]:
+            commence = _parse_commence(event.get("commence_time", ""))
+            if not commence:
+                continue
+            delta = abs((commence - match.match_date).total_seconds())
+            if delta > 10800:
+                continue
+            if await event_matches_teams(
                 session,
-                match.id,
-                PROVIDER_THE_ODDS_API,
-                event["id"],
-                confidence=0.9,
-            )
-            return True
+                event_home=event.get("home_team", ""),
+                event_away=event.get("away_team", ""),
+                home_id=match.team_home_id,
+                home_name=match.team_home,
+                away_id=match.team_away_id,
+                away_name=match.team_away,
+                sport=match.sport,
+            ):
+                await save_match_external_id(
+                    session,
+                    match.id,
+                    PROVIDER_THE_ODDS_API,
+                    event["id"],
+                    confidence=0.9,
+                )
+                return True
     return False
 
 

@@ -415,3 +415,5 @@ PERSON_CATALOG: tuple[CatalogEntry, ...] = (
 )
 
 ALL_CATALOG: tuple[CatalogEntry, ...] = COUNTRY_CATALOG + PERSON_CATALOG
+
+COUNTRY_KEYS: frozenset[str] = frozenset(e.key for e in COUNTRY_CATALOG)

@@ -16,15 +16,10 @@ SPORT_TO_ODDS_KEY: dict[str, str] = {
     "mma": "mma_mixed_martial_arts",
 }
 
-# Обратный маппинг для bulk fetch по лигам (football)
-ODDS_SPORT_KEYS_FOOTBALL = [
-    "soccer_epl",
-    "soccer_spain_la_liga",
-    "soccer_germany_bundesliga",
-    "soccer_italy_serie_a",
-    "soccer_france_ligue_one",
-    "soccer_uefa_champs_league",
-]
+# Bulk fetch football odds (клубные лиги + сборные / ЧМ)
+from src.api_clients.odds_keys import all_football_odds_keys  # noqa: E402
+
+ODDS_SPORT_KEYS_FOOTBALL = all_football_odds_keys()
 
 
 def sport_for_odds_key(sport_key: str) -> str:
