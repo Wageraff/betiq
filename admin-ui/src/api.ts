@@ -67,6 +67,9 @@ export type MatchBrief = {
   team_away: string;
   sport: string | null;
   competition: string | null;
+  round?: string | null;
+  venue_name?: string | null;
+  venue_city?: string | null;
   match_date: string | null;
   status?: string | null;
   score?: string | null;

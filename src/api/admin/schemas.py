@@ -68,6 +68,9 @@ class AdminMatchBrief(BaseModel):
     team_away_id: Optional[int] = None
     sport: Optional[str] = None
     competition: Optional[str] = None
+    round: Optional[str] = None
+    venue_name: Optional[str] = None
+    venue_city: Optional[str] = None
     match_date: Optional[datetime] = None
     status: Optional[str] = None
     score: Optional[str] = None

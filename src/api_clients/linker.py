@@ -19,6 +19,7 @@ from src.api_clients.external_ids import (
     save_team_external_id,
     sync_team_logo_from_api,
 )
+from src.api_clients.fixture_fields import apply_fixture_fields
 from src.api_clients.matching import event_matches_teams
 from src.api_clients.the_odds_api import TheOddsApiClient
 from src.db.models import Match
@@ -34,38 +35,6 @@ def _parse_commence(iso: str) -> datetime | None:
         return dt
     except ValueError:
         return None
-
-
-def _apply_fixture_fields(match: Match, fixture: dict) -> None:
-    fix = fixture.get("fixture") or {}
-    league = fixture.get("league") or {}
-    teams = fixture.get("teams") or {}
-    goals = fixture.get("goals") or {}
-    score = fixture.get("score") or {}
-    ht = score.get("halftime") or {}
-
-    match.status = (fix.get("status") or {}).get("short") or match.status
-    venue = fix.get("venue") or {}
-    match.venue_name = venue.get("name") or match.venue_name
-    match.venue_city = venue.get("city") or match.venue_city
-    match.season = str(league.get("season") or "") or match.season
-    match.round = league.get("round") or match.round
-    if goals.get("home") is not None:
-        match.score_home = goals.get("home")
-    if goals.get("away") is not None:
-        match.score_away = goals.get("away")
-    if ht.get("home") is not None:
-        match.score_ht_home = ht.get("home")
-    if ht.get("away") is not None:
-        match.score_ht_away = ht.get("away")
-
-    for side, key in (("home", "team_home_id"), ("away", "team_away_id")):
-        tdata = teams.get(side) or {}
-        tid = getattr(match, key)
-        logo = tdata.get("logo")
-        if tid and logo:
-            # sync in caller with session
-            pass
 
 
 async def link_match_to_api_football(
@@ -96,7 +65,7 @@ async def link_match_to_api_football(
                     session, match.id, PROVIDER_API_FOOTBALL, fid,
                     confidence=1.0,
                 )
-                _apply_fixture_fields(match, f)
+                await apply_fixture_fields(session, match, f)
                 await _save_teams_from_fixture(session, match, f)
                 return True
 
@@ -122,7 +91,7 @@ async def link_match_to_api_football(
                 session, match.id, PROVIDER_API_FOOTBALL, fid,
                 confidence=0.85,
             )
-            _apply_fixture_fields(match, f)
+            await apply_fixture_fields(session, match, f)
             await _save_teams_from_fixture(session, match, f)
             return True
     return False
@@ -203,8 +172,9 @@ async def link_match_to_odds_api(
 
 async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> dict[str, int]:
     from src.api_clients.external_ids import matches_without_provider
+    from src.api_clients.fixture_fields import refresh_linked_football_fields
 
-    stats = {"api_football": 0, "the_odds_api": 0, "checked": 0}
+    stats = {"api_football": 0, "the_odds_api": 0, "refreshed": 0, "checked": 0}
     af = ApiFootballClient()
     odds = TheOddsApiClient()
     fixtures_by_date: dict[str, list[dict]] = {}
@@ -244,4 +214,11 @@ async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> di
             except Exception:
                 log.exception("Link failed match_id=%s provider=%s", match.id, provider)
         await session.commit()
+
+    try:
+        stats["refreshed"] = await refresh_linked_football_fields(session, limit=40)
+        await session.commit()
+    except Exception:
+        log.exception("refresh_linked_football_fields failed")
+
     return stats

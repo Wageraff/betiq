@@ -276,6 +276,12 @@ export default function MatchDetailPage() {
         <span>ID {m.id}</span>
         {m.sport && <span>{m.sport}</span>}
         {m.competition && <span>{m.competition}</span>}
+        {m.round && <span>{m.round}</span>}
+        {(m.venue_name || m.venue_city) && (
+          <span>
+            {[m.venue_name, m.venue_city].filter(Boolean).join(", ")}
+          </span>
+        )}
         {m.status && <span>{m.status}</span>}
         {m.match_date && (
           <span>{new Date(m.match_date).toLocaleString(DATE_LOCALE)} UTC</span>

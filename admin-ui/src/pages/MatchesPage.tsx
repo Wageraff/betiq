@@ -80,6 +80,9 @@ export default function MatchesPage() {
               <th>ID</th>
               <th>Match</th>
               <th>Sport</th>
+              <th>Competition</th>
+              <th>Round</th>
+              <th>Venue</th>
               <th>Date (UTC)</th>
               <th>Score</th>
               <th>API</th>
@@ -99,6 +102,25 @@ export default function MatchesPage() {
                   </Link>
                 </td>
                 <td>{m.sport || "—"}</td>
+                <td title={m.competition || ""}>
+                  {m.competition
+                    ? m.competition.length > 28
+                      ? `${m.competition.slice(0, 28)}…`
+                      : m.competition
+                    : "—"}
+                </td>
+                <td>
+                  {m.round
+                    ? m.round.length > 24
+                      ? `${m.round.slice(0, 24)}…`
+                      : m.round
+                    : "—"}
+                </td>
+                <td>
+                  {m.venue_name
+                    ? `${m.venue_name}${m.venue_city ? `, ${m.venue_city}` : ""}`
+                    : "—"}
+                </td>
                 <td>
                   {m.match_date
                     ? new Date(m.match_date).toLocaleString(DATE_LOCALE)
