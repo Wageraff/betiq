@@ -6,11 +6,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api_clients.constants import (
-    PROVIDER_API_FOOTBALL,
-    PROVIDER_THE_ODDS_API,
+from src.api_clients.odds_keys import (
+    all_football_odds_keys,
+    all_non_football_odds_keys,
+    odds_sport_keys_for_match,
 )
-from src.api_clients.odds_keys import odds_sport_keys_for_match
 from src.config import settings
 from src.db.models import Match, MatchExternalId, MatchOdds
 
@@ -36,27 +36,28 @@ def is_upcoming_match(match: Match, *, since: datetime, until: datetime) -> bool
     return True
 
 
-async def upcoming_football_matches(session: AsyncSession) -> list[Match]:
+async def upcoming_matches(
+    session: AsyncSession, *, sports: set[str] | None = None
+) -> list[Match]:
     since, until = upcoming_match_window()
-    rows = (
-        await session.scalars(
-            select(Match)
-            .where(
-                Match.sport == "football",
-                Match.match_date.isnot(None),
-                Match.match_date >= since,
-                Match.match_date <= until,
-            )
-            .order_by(Match.match_date.asc())
-        )
-    ).all()
+    stmt = select(Match).where(
+        Match.match_date.isnot(None),
+        Match.match_date >= since,
+        Match.match_date <= until,
+    )
+    if sports:
+        stmt = stmt.where(Match.sport.in_(sorted(sports)))
+    rows = (await session.scalars(stmt.order_by(Match.match_date.asc()))).all()
     return [m for m in rows if is_upcoming_match(m, since=since, until=until)]
+
+
+async def upcoming_football_matches(session: AsyncSession) -> list[Match]:
+    return await upcoming_matches(session, sports={"football"})
 
 
 async def collect_odds_sport_keys(
     session: AsyncSession, matches: list[Match]
 ) -> dict[str, list[Match]]:
-    """sport_key → матчи, для которых он нужен."""
     by_key: dict[str, list[Match]] = {}
     for match in matches:
         for key in await odds_sport_keys_for_match(session, match):
@@ -64,12 +65,24 @@ async def collect_odds_sport_keys(
     return by_key
 
 
-async def sport_keys_for_odds_sync(session: AsyncSession) -> list[str]:
+async def sport_keys_for_odds_sync(
+    session: AsyncSession, *, sports: set[str] | None = None
+) -> list[str]:
     if settings.odds_sync_mode == "all_leagues":
-        from src.api_clients.constants import ODDS_SPORT_KEYS_FOOTBALL
+        keys: list[str] = []
+        if sports is None or "football" in sports:
+            keys.extend(all_football_odds_keys())
+        if sports is None or sports - {"football"}:
+            keys.extend(all_non_football_odds_keys())
+        seen: set[str] = set()
+        out: list[str] = []
+        for k in keys:
+            if k not in seen:
+                seen.add(k)
+                out.append(k)
+        return out
 
-        return list(ODDS_SPORT_KEYS_FOOTBALL)
-    matches = await upcoming_football_matches(session)
+    matches = await upcoming_matches(session, sports=sports)
     by_key = await collect_odds_sport_keys(session, matches)
     return sorted(by_key.keys())
 

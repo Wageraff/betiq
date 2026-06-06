@@ -157,6 +157,7 @@ export type MatchApiData = {
 
 export type ApiCoverageMatch = {
   id: number;
+  sport?: string | null;
   team_home: string;
   team_away: string;
   competition?: string | null;
@@ -172,13 +173,15 @@ export type ApiCoverageMatch = {
 export type ApiCoverageSportKey = {
   sport_key: string;
   label: string;
+  sport?: string | null;
   match_count: number;
   matches: ApiCoverageMatch[];
 };
 
 export type ApiSyncCoverage = {
   odds_sync_mode: string;
-  upcoming_football_total: number;
+  upcoming_total: number;
+  upcoming_by_sport?: Record<string, number>;
   window: {
     since?: string;
     until?: string;

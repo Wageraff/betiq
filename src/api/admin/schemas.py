@@ -313,6 +313,7 @@ class ApiProviderQuotaOut(BaseModel):
 
 class ApiSyncCoverageMatchOut(BaseModel):
     id: int
+    sport: Optional[str] = None
     team_home: str
     team_away: str
     competition: Optional[str] = None
@@ -328,13 +329,15 @@ class ApiSyncCoverageMatchOut(BaseModel):
 class ApiSyncSportKeyOut(BaseModel):
     sport_key: str
     label: str
+    sport: Optional[str] = None
     match_count: int
     matches: list[ApiSyncCoverageMatchOut] = Field(default_factory=list)
 
 
 class ApiSyncCoverageOut(BaseModel):
     odds_sync_mode: str
-    upcoming_football_total: int = 0
+    upcoming_total: int = 0
+    upcoming_by_sport: dict[str, int] = Field(default_factory=dict)
     window: dict[str, object] = Field(default_factory=dict)
     the_odds_api: dict[str, object] = Field(default_factory=dict)
     api_football_odds: dict[str, object] = Field(default_factory=dict)

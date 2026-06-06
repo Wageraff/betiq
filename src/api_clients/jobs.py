@@ -8,8 +8,8 @@ from sqlalchemy import select
 from src.api_clients.competitions_sync import sync_leagues_from_api_football
 from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_team_external_id, sync_team_logo_from_api
-from src.api_clients.linker import link_unlinked_matches
 from src.api_clients.football_odds_sync import sync_api_football_odds
+from src.api_clients.linker import link_unlinked_matches
 from src.api_clients.odds_sync import sync_all_odds
 from src.api_clients.stats_sync import (
     sync_post_match_stats,
@@ -91,7 +91,8 @@ async def job_fetch_lineups() -> None:
         log.info("job_fetch_lineups: %s", n)
 
 
-async def job_fetch_odds_football() -> None:
+async def job_fetch_odds() -> None:
+    """The Odds API — все виды спорта (db_matches) + API-Football /odds для football."""
     if not settings.the_odds_api_key and not settings.api_football_odds_enabled:
         return
     n_odds = 0
@@ -99,7 +100,7 @@ async def job_fetch_odds_football() -> None:
     if settings.the_odds_api_key:
         async with async_session_factory() as session:
             try:
-                n_odds = await sync_all_odds(session, football_only=True)
+                n_odds = await sync_all_odds(session, sports=None)
             except Exception:
                 await session.rollback()
                 log.exception("The Odds API sync failed")
@@ -110,19 +111,17 @@ async def job_fetch_odds_football() -> None:
             except Exception:
                 await session.rollback()
                 log.exception("API-Football odds sync failed")
-    log.info(
-        "job_fetch_odds_football: the_odds_api=%s api_football=%s",
-        n_odds,
-        n_af,
-    )
+    log.info("job_fetch_odds: the_odds_api=%s api_football=%s", n_odds, n_af)
+
+
+async def job_fetch_odds_football() -> None:
+    """Алиас для обратной совместимости (scripts, старый scheduler id)."""
+    await job_fetch_odds()
 
 
 async def job_fetch_odds_other() -> None:
-    if not settings.the_odds_api_key:
-        return
-    async with async_session_factory() as session:
-        n = await sync_all_odds(session, football_only=False)
-        log.info("job_fetch_odds_other: %s lines", n)
+    """Deprecated: объединено в job_fetch_odds."""
+    await job_fetch_odds()
 
 
 async def job_fetch_post_match_stats() -> None:

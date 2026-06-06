@@ -29,7 +29,7 @@ async def main_async(action: str) -> None:
     elif action == "lineups":
         await api_jobs.job_fetch_lineups()
     elif action == "odds":
-        await api_jobs.job_fetch_odds_football()
+        await api_jobs.job_fetch_odds()
     elif action == "stats":
         await api_jobs.job_fetch_post_match_stats()
     elif action == "cleanup":

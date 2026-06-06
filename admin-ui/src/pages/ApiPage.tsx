@@ -28,7 +28,7 @@ function MatchBadges({ m }: { m: ApiCoverageMatch }) {
 const SYNC_ACTIONS: { id: string; label: string; hint: string }[] = [
   { id: "link", label: "Link matches", hint: "API-Football + Odds API" },
   { id: "leagues", label: "Sync leagues", hint: "competitions" },
-  { id: "odds", label: "Fetch odds", hint: "The Odds API + API-Football /odds" },
+  { id: "odds", label: "Fetch odds", hint: "All sports (Odds API) + API-Football" },
   { id: "form", label: "Team form", hint: "48h window" },
   { id: "lineups", label: "Lineups", hint: "< 2h to kickoff" },
   { id: "stats", label: "Post-match stats", hint: "FT only" },
@@ -173,7 +173,17 @@ export default function ApiPage() {
               ? " — опрашиваются только лиги из предстоящих матчей в БД"
               : " — опрашиваются все зашитые лиги"}
             {" · "}
-            предстоящих football-матчей: {cov.upcoming_football_total}
+            предстоящих матчей: {cov.upcoming_total}
+            {cov.upcoming_by_sport && Object.keys(cov.upcoming_by_sport).length > 0 && (
+              <>
+                {" "}
+                (
+                {Object.entries(cov.upcoming_by_sport)
+                  .map(([s, n]) => `${s}: ${n}`)
+                  .join(", ")}
+                )
+              </>
+            )}
             {cov.window?.until && (
               <>
                 {" · "}
@@ -198,6 +208,7 @@ export default function ApiPage() {
                 (cov.the_odds_api.bulk_sport_keys ?? []).map((sk) => (
                   <details key={sk.sport_key} style={{ marginBottom: 8 }}>
                     <summary>
+                      {sk.sport && <span className="badge">{sk.sport}</span>}{" "}
                       <code>{sk.sport_key}</code> — {sk.label} ({sk.match_count})
                     </summary>
                     <table className="compact-table">
@@ -264,13 +275,16 @@ export default function ApiPage() {
                 Без sport_key The Odds API ({cov.the_odds_api.unmapped_match_count})
               </h4>
               <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
-                Коэффициенты только через API-Football (если fixture связан)
+                Нет sport_key в Odds API (волейбол/гандбол и др.) — только API-Football для football
               </p>
               <table className="compact-table">
                 <tbody>
                   {(cov.the_odds_api.unmapped_matches ?? []).map((m) => (
                     <tr key={m.id}>
-                      <td><MatchLinks m={m} /></td>
+                      <td>
+                        {m.sport && <span className="badge">{m.sport}</span>}{" "}
+                        <MatchLinks m={m} />
+                      </td>
                       <td>{m.competition ?? "—"}</td>
                       <td><MatchBadges m={m} /></td>
                     </tr>

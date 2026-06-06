@@ -1,6 +1,9 @@
 """Сводка: какие матчи и лиги сейчас в очереди API-синка."""
 from __future__ import annotations
 
+from collections import defaultdict
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.constants import PROVIDER_API_FOOTBALL, PROVIDER_THE_ODDS_API
@@ -10,12 +13,11 @@ from src.api_clients.odds_scope import (
     collect_odds_sport_keys,
     match_external_providers,
     match_odds_counts,
-    upcoming_football_matches,
+    upcoming_matches,
     upcoming_match_window,
 )
 from src.config import settings
 from src.db.models import Match
-from sqlalchemy import select
 
 
 def _markets_count(csv: str) -> int:
@@ -24,7 +26,7 @@ def _markets_count(csv: str) -> int:
 
 async def fetch_sync_coverage(session: AsyncSession) -> dict:
     since, until = upcoming_match_window()
-    matches = await upcoming_football_matches(session)
+    matches = await upcoming_matches(session)
     match_ids = [m.id for m in matches]
     providers = await match_external_providers(session, match_ids)
     odds_counts = await match_odds_counts(session, match_ids)
@@ -40,6 +42,7 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
             {
                 "sport_key": key,
                 "label": ODDS_KEY_LABELS.get(key, key),
+                "sport": group[0].sport if group else None,
                 "match_count": len(group),
                 "matches": [
                     _match_brief(
@@ -52,6 +55,10 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
                 ],
             }
         )
+
+    by_sport: dict[str, int] = defaultdict(int)
+    for m in matches:
+        by_sport[m.sport or "unknown"] += 1
 
     unmapped = []
     for m in matches:
@@ -66,9 +73,10 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
                 )
             )
 
+    football_matches = [m for m in matches if m.sport == "football"]
     linked_odds = [
         m
-        for m in matches
+        for m in football_matches
         if PROVIDER_THE_ODDS_API in providers.get(m.id, set())
     ][: settings.the_odds_api_event_batch_size]
 
@@ -103,7 +111,8 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
             "days_ahead": settings.odds_upcoming_days_ahead,
             "skip_finished_hours": settings.odds_skip_finished_hours,
         },
-        "upcoming_football_total": len(matches),
+        "upcoming_total": len(matches),
+        "upcoming_by_sport": dict(sorted(by_sport.items())),
         "the_odds_api": {
             "bulk_sport_keys": sport_keys_out,
             "bulk_sport_key_count": len(by_key),
@@ -116,7 +125,7 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
             )
             * event_markets,
             "unmapped_match_count": len(unmapped),
-            "unmapped_matches": unmapped[:20],
+            "unmapped_matches": unmapped[:25],
         },
         "api_football_odds": {
             "enabled": settings.api_football_odds_enabled,
@@ -141,6 +150,7 @@ def _match_brief(
 ) -> dict:
     return {
         "id": m.id,
+        "sport": m.sport,
         "team_home": m.team_home,
         "team_away": m.team_away,
         "competition": m.competition,

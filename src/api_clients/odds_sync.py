@@ -7,19 +7,15 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api_clients.constants import (
-    PROVIDER_THE_ODDS_API,
-    SPORT_TO_ODDS_KEY,
-    sport_for_odds_key,
-)
-from src.api_clients.odds_scope import (
-    sport_keys_for_odds_sync,
-    upcoming_football_matches,
-)
+from src.api_clients.constants import PROVIDER_THE_ODDS_API, sport_for_odds_key
 from src.api_clients.external_ids import save_match_external_id
 from src.api_clients.matching import event_matches_teams
 from src.api_clients.odds import ingest_odds_api_event
 from src.api_clients.odds_keys import odds_sport_keys_for_match
+from src.api_clients.odds_scope import (
+    sport_keys_for_odds_sync,
+    upcoming_matches,
+)
 from src.api_clients.the_odds_api import TheOddsApiClient
 from src.config import settings
 from src.db.models import Match, MatchExternalId
@@ -38,8 +34,6 @@ def _parse_commence(iso: str) -> datetime | None:
 
 
 async def _match_by_odds_event_id(session: AsyncSession, event_id: str) -> Match | None:
-    from src.db.models import MatchExternalId
-
     row = await session.scalar(
         select(MatchExternalId).where(
             MatchExternalId.provider == PROVIDER_THE_ODDS_API,
@@ -116,16 +110,22 @@ async def sync_odds_for_sport_key(session: AsyncSession, sport_key: str) -> int:
 
 
 async def sync_linked_event_odds(
-    session: AsyncSession, *, football_only: bool = True
+    session: AsyncSession,
+    *,
+    sports: set[str] | None = None,
 ) -> int:
-    """btts / alternate_* через per-event endpoint для матчей с event_id."""
+    """btts / alternate_* — per-event; только football (рынки soccer-specific)."""
     if not settings.the_odds_api_event_markets.strip():
         return 0
     client = TheOddsApiClient()
     if not client.enabled:
         return 0
 
-    upcoming_ids = {m.id for m in await upcoming_football_matches(session)}
+    event_sports = sports if sports else {"football"}
+    if "football" not in event_sports:
+        return 0
+
+    upcoming_ids = {m.id for m in await upcoming_matches(session, sports={"football"})}
     if not upcoming_ids:
         return 0
     stmt = (
@@ -134,12 +134,10 @@ async def sync_linked_event_odds(
         .where(
             MatchExternalId.provider == PROVIDER_THE_ODDS_API,
             Match.id.in_(upcoming_ids),
+            Match.sport == "football",
         )
-    )
-    if football_only:
-        stmt = stmt.where(Match.sport == "football")
-    stmt = stmt.order_by(Match.match_date.asc()).limit(
-        settings.the_odds_api_event_batch_size
+        .order_by(Match.match_date.asc())
+        .limit(settings.the_odds_api_event_batch_size)
     )
     rows = (await session.execute(stmt)).all()
 
@@ -162,26 +160,28 @@ async def sync_linked_event_odds(
     return total
 
 
-async def sync_all_odds(session: AsyncSession, *, football_only: bool = False) -> int:
+async def sync_all_odds(
+    session: AsyncSession, *, sports: set[str] | None = None
+) -> int:
+    """The Odds API bulk (+ event-odds для football). sports=None → все поддерживаемые."""
+    keys = await sport_keys_for_odds_sync(session, sports=sports)
+    upcoming = await upcoming_matches(session, sports=sports)
+    log.info(
+        "Odds sync mode=%s sports=%s keys=%s upcoming_matches=%s",
+        settings.odds_sync_mode,
+        sorted(sports) if sports else "all",
+        keys,
+        len(upcoming),
+    )
     total = 0
-    if football_only:
-        keys = await sport_keys_for_odds_sync(session)
-        log.info(
-            "Odds sync mode=%s football keys=%s upcoming=%s",
-            settings.odds_sync_mode,
-            keys,
-            len(await upcoming_football_matches(session)),
-        )
-    else:
-        keys = list(SPORT_TO_ODDS_KEY.values())
     for key in keys:
         try:
             total += await sync_odds_for_sport_key(session, key)
         except Exception:
             log.exception("Odds sync failed for %s", key)
-    if football_only:
+    if sports is None or "football" in sports:
         try:
-            total += await sync_linked_event_odds(session, football_only=True)
+            total += await sync_linked_event_odds(session, sports=sports)
         except Exception:
             log.exception("Event odds sync failed")
     return total
