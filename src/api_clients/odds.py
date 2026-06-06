@@ -14,6 +14,8 @@ log = logging.getLogger("odds_sync")
 
 MOVEMENT_THRESHOLD_PCT = 5.0
 SIGNIFICANT_THRESHOLD_PCT = 10.0
+# odds_history.movement_pct — NUMERIC(5,2)
+MOVEMENT_PCT_MAX = Decimal("999.99")
 
 THE_ODDS_API_MARKET_KEYS = frozenset(
     {
@@ -31,6 +33,23 @@ THE_ODDS_API_MARKET_KEYS = frozenset(
         "double_chance",
     }
 )
+
+
+def _odds_outcome_key(name: str, point: Decimal | float | None) -> str:
+    """Уникальный outcome: Over/Under с разными point — разные строки."""
+    label = (name or "?").strip()
+    if point is not None:
+        return f"{label} ({point})"
+    return label
+
+
+def _clamp_movement_pct(movement: float) -> Decimal:
+    pct = Decimal(str(round(movement, 2)))
+    if pct > MOVEMENT_PCT_MAX:
+        return MOVEMENT_PCT_MAX
+    if pct < -MOVEMENT_PCT_MAX:
+        return -MOVEMENT_PCT_MAX
+    return pct
 
 
 def _odds_outcome_label(value: object) -> str:
@@ -118,7 +137,7 @@ async def upsert_match_odds(
                 outcome=outcome,
                 odds_prev=prev.odds,
                 odds_curr=new_odds,
-                movement_pct=Decimal(str(round(movement, 2))),
+                movement_pct=_clamp_movement_pct(movement),
                 direction="DOWN" if movement < 0 else "UP",
                 is_significant=abs(movement) >= SIGNIFICANT_THRESHOLD_PCT,
             )
@@ -142,6 +161,7 @@ async def ingest_odds_api_event(
             market = mkt.get("key") or "unknown"
             for out in mkt.get("outcomes") or []:
                 name = out.get("name") or "?"
+                point = out.get("point")
                 price = out.get("price")
                 if price is None:
                     continue
@@ -151,9 +171,9 @@ async def ingest_odds_api_event(
                     sport=sport,
                     bookmaker=bk,
                     market=market,
-                    outcome=name,
+                    outcome=_odds_outcome_key(name, point),
                     odds=price,
-                    point=out.get("point"),
+                    point=point,
                 )
                 count += 1
     match.odds_fetched_at = datetime.now(timezone.utc)

@@ -136,12 +136,16 @@ async def sync_linked_event_odds(
     for match, event_id in rows:
         if not event_id:
             continue
-        sport_keys = await odds_sport_keys_for_match(session, match)
-        for sport_key in sport_keys:
-            event = await client.get_event_odds(sport_key, event_id)
-            if event and event.get("bookmakers"):
-                total += await ingest_odds_api_event(session, match, event)
-                break
+        try:
+            sport_keys = await odds_sport_keys_for_match(session, match)
+            for sport_key in sport_keys:
+                event = await client.get_event_odds(sport_key, event_id)
+                if event and event.get("bookmakers"):
+                    total += await ingest_odds_api_event(session, match, event)
+                    break
+        except Exception:
+            await session.rollback()
+            log.exception("Event odds failed match_id=%s", match.id)
     await session.commit()
     log.info("The Odds API event odds: %s lines for %s matches", total, len(rows))
     return total
