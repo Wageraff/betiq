@@ -68,9 +68,105 @@ export type MatchBrief = {
   sport: string | null;
   competition: string | null;
   match_date: string | null;
+  status?: string | null;
+  score?: string | null;
   predictions_count: number;
   has_ai: boolean;
   ai_confidence?: string | null;
+  has_api_football?: boolean;
+  has_odds_api?: boolean;
+  odds_count?: number;
+  has_match_stats?: boolean;
+};
+
+export type MatchExternalId = {
+  provider: string;
+  external_id: string;
+  link_method?: string | null;
+  confidence?: number | null;
+  linked_at?: string | null;
+};
+
+export type MatchStatsRow = {
+  side: string;
+  half: string;
+  shots_on_goal?: number | null;
+  shots_total?: number | null;
+  corners?: number | null;
+  fouls?: number | null;
+  yellow_cards?: number | null;
+  red_cards?: number | null;
+  possession?: number | null;
+  fetched_at?: string | null;
+};
+
+export type MatchOddsRow = {
+  bookmaker: string;
+  market: string;
+  outcome: string;
+  odds: string | number;
+  point?: string | number | null;
+  is_live: boolean;
+  recorded_at?: string | null;
+};
+
+export type OddsHistoryRow = {
+  bookmaker: string;
+  market: string;
+  outcome: string;
+  odds_prev?: string | number | null;
+  odds_curr: string | number;
+  movement_pct?: string | number | null;
+  direction?: string | null;
+  is_significant: boolean;
+  recorded_at?: string | null;
+};
+
+export type TeamFormRow = {
+  match_date?: string | null;
+  opponent_name?: string | null;
+  is_home?: boolean | null;
+  result?: string | null;
+  goals_scored?: number | null;
+  goals_conceded?: number | null;
+  competition_name?: string | null;
+};
+
+export type MatchApiData = {
+  status?: string | null;
+  venue_name?: string | null;
+  venue_city?: string | null;
+  season?: string | null;
+  round?: string | null;
+  score?: string | null;
+  score_ht?: string | null;
+  stats_fetched_at?: string | null;
+  odds_fetched_at?: string | null;
+  external_ids: MatchExternalId[];
+  match_stats: MatchStatsRow[];
+  odds: MatchOddsRow[];
+  odds_history: OddsHistoryRow[];
+  lineups: { side?: string; formation?: string; coach_name?: string; players_count: number }[];
+  team_form_home: TeamFormRow[];
+  team_form_away: TeamFormRow[];
+};
+
+export type ApiSyncStatus = {
+  api_sync_enabled: boolean;
+  api_football: {
+    configured: boolean;
+    requests_today?: number | null;
+    limit_day?: number | null;
+    subscription?: string | null;
+    error?: string | null;
+  };
+  the_odds_api: {
+    configured: boolean;
+    remaining?: number | null;
+    used?: number | null;
+    error?: string | null;
+  };
+  db_counts: Record<string, number>;
 };
 
 export type PredictionBet = {
@@ -100,6 +196,7 @@ export type MatchDetail = {
   ai_confidence: string | null;
   ai_generated_at: string | null;
   ai_model: string | null;
+  api_data?: MatchApiData | null;
 };
 
 export type TeamBriefInGroup = {

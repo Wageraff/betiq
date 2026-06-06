@@ -85,3 +85,19 @@ async def ai_summary(match_id: int, force: bool) -> str:
     if force:
         argv.append("--force")
     return await run_job(argv)
+
+
+async def api_sync(action: str) -> str:
+    allowed = {
+        "link",
+        "leagues",
+        "logos",
+        "form",
+        "lineups",
+        "odds",
+        "stats",
+        "cleanup",
+    }
+    if action not in allowed:
+        raise ValueError(f"Unknown api_sync action: {action}")
+    return await run_job([_python(), "scripts/api_sync.py", action])

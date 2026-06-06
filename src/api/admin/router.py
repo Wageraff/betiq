@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from src.api.admin.deps import require_admin
-from src.api.admin.routes import actions, ai, matches, settings, teams
+from src.api.admin.routes import actions, ai, api_sync, matches, settings, teams
 
 admin_router = APIRouter(
     prefix="/api/admin/v1",
@@ -14,3 +14,4 @@ admin_router.include_router(teams.router)
 admin_router.include_router(ai.router)
 admin_router.include_router(settings.router)
 admin_router.include_router(actions.router)
+admin_router.include_router(api_sync.router)

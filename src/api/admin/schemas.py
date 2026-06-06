@@ -1,7 +1,7 @@
 """Схемы Admin API."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -69,9 +69,15 @@ class AdminMatchBrief(BaseModel):
     sport: Optional[str] = None
     competition: Optional[str] = None
     match_date: Optional[datetime] = None
+    status: Optional[str] = None
+    score: Optional[str] = None
     predictions_count: int = 0
     has_ai: bool = False
     ai_confidence: Optional[str] = None
+    has_api_football: bool = False
+    has_odds_api: bool = False
+    odds_count: int = 0
+    has_match_stats: bool = False
 
 
 class AdminMatchesList(BaseModel):
@@ -100,6 +106,86 @@ class AdminPredictionOut(BaseModel):
     bets: list[AdminBetOut] = Field(default_factory=list)
 
 
+class AdminExternalIdOut(BaseModel):
+    provider: str
+    external_id: str
+    link_method: Optional[str] = None
+    confidence: Optional[float] = None
+    linked_at: Optional[datetime] = None
+
+
+class AdminMatchStatsOut(BaseModel):
+    side: str
+    half: str = "full"
+    shots_on_goal: Optional[int] = None
+    shots_total: Optional[int] = None
+    corners: Optional[int] = None
+    fouls: Optional[int] = None
+    yellow_cards: Optional[int] = None
+    red_cards: Optional[int] = None
+    possession: Optional[int] = None
+    fetched_at: Optional[datetime] = None
+
+
+class AdminMatchOddsOut(BaseModel):
+    bookmaker: str
+    market: str
+    outcome: str
+    odds: Decimal
+    point: Optional[Decimal] = None
+    is_live: bool = False
+    recorded_at: Optional[datetime] = None
+
+
+class AdminOddsHistoryOut(BaseModel):
+    bookmaker: str
+    market: str
+    outcome: str
+    odds_prev: Optional[Decimal] = None
+    odds_curr: Decimal
+    movement_pct: Optional[Decimal] = None
+    direction: Optional[str] = None
+    is_significant: bool = False
+    recorded_at: Optional[datetime] = None
+
+
+class AdminLineupOut(BaseModel):
+    side: Optional[str] = None
+    formation: Optional[str] = None
+    coach_name: Optional[str] = None
+    players_count: int = 0
+    fetched_at: Optional[datetime] = None
+
+
+class AdminTeamFormOut(BaseModel):
+    match_date: Optional[date] = None
+    opponent_name: Optional[str] = None
+    is_home: Optional[bool] = None
+    result: Optional[str] = None
+    goals_scored: Optional[int] = None
+    goals_conceded: Optional[int] = None
+    competition_name: Optional[str] = None
+
+
+class AdminMatchApiData(BaseModel):
+    status: Optional[str] = None
+    venue_name: Optional[str] = None
+    venue_city: Optional[str] = None
+    season: Optional[str] = None
+    round: Optional[str] = None
+    score: Optional[str] = None
+    score_ht: Optional[str] = None
+    stats_fetched_at: Optional[datetime] = None
+    odds_fetched_at: Optional[datetime] = None
+    external_ids: list[AdminExternalIdOut] = Field(default_factory=list)
+    match_stats: list[AdminMatchStatsOut] = Field(default_factory=list)
+    odds: list[AdminMatchOddsOut] = Field(default_factory=list)
+    odds_history: list[AdminOddsHistoryOut] = Field(default_factory=list)
+    lineups: list[AdminLineupOut] = Field(default_factory=list)
+    team_form_home: list[AdminTeamFormOut] = Field(default_factory=list)
+    team_form_away: list[AdminTeamFormOut] = Field(default_factory=list)
+
+
 class AdminMatchDetail(BaseModel):
     match: AdminMatchBrief
     predictions: list[AdminPredictionOut] = Field(default_factory=list)
@@ -108,6 +194,7 @@ class AdminMatchDetail(BaseModel):
     ai_confidence: Optional[str] = None
     ai_generated_at: Optional[datetime] = None
     ai_model: Optional[str] = None
+    api_data: Optional[AdminMatchApiData] = None
 
 
 class AdminAiMatchBrief(BaseModel):
@@ -204,3 +291,24 @@ class AppLogClearOut(BaseModel):
     ok: bool
     path: str
     bytes_cleared: int = 0
+
+
+class ApiSyncActionRequest(BaseModel):
+    action: str
+
+
+class ApiProviderQuotaOut(BaseModel):
+    configured: bool
+    requests_today: Optional[int] = None
+    limit_day: Optional[int] = None
+    subscription: Optional[str] = None
+    remaining: Optional[int] = None
+    used: Optional[int] = None
+    error: Optional[str] = None
+
+
+class ApiSyncStatusOut(BaseModel):
+    api_sync_enabled: bool
+    api_football: ApiProviderQuotaOut
+    the_odds_api: ApiProviderQuotaOut
+    db_counts: dict[str, int]

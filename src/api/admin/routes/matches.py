@@ -12,18 +12,27 @@ from sqlalchemy.orm import selectinload
 from src.api.admin.deps import require_admin
 from src.api.admin.schemas import (
     AdminBetOut,
+    AdminMatchApiData,
     AdminMatchBrief,
     AdminMatchDetail,
     AdminMatchesList,
     AdminPredictionOut,
 )
+from src.api.admin.services.match_api_data import load_list_meta, load_match_api_bundle
 from src.api.deps import get_db
-from src.db.models import Match, Prediction
+from src.db.models import Match, MatchExternalId, Prediction
 
 router = APIRouter(prefix="/matches", tags=["admin-matches"])
 
 
-def _brief(m: Match) -> AdminMatchBrief:
+def _score_str(m: Match) -> Optional[str]:
+    if m.score_home is not None and m.score_away is not None:
+        return f"{m.score_home}-{m.score_away}"
+    return None
+
+
+def _brief(m: Match, meta: dict | None = None) -> AdminMatchBrief:
+    meta = meta or {}
     return AdminMatchBrief(
         id=m.id,
         match_key=m.match_key,
@@ -35,9 +44,15 @@ def _brief(m: Match) -> AdminMatchBrief:
         sport=m.sport,
         competition=m.competition,
         match_date=m.match_date,
+        status=m.status,
+        score=_score_str(m),
         predictions_count=m.predictions_count or 0,
         has_ai=bool(m.ai_summary),
         ai_confidence=m.ai_confidence,
+        has_api_football=bool(meta.get("has_api_football")),
+        has_odds_api=bool(meta.get("has_odds_api")),
+        odds_count=int(meta.get("odds_count", 0)),
+        has_match_stats=bool(meta.get("has_match_stats")),
     )
 
 
@@ -48,6 +63,7 @@ async def list_matches(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     has_ai: Optional[bool] = None,
+    has_api: Optional[bool] = Query(None, description="Есть линковка API-Football или Odds"),
     page: int = Query(1, ge=1),
     limit: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -76,6 +92,14 @@ async def list_matches(
         flt = or_(Match.team_home.ilike(like), Match.team_away.ilike(like))
         stmt = stmt.where(flt)
         count_stmt = count_stmt.where(flt)
+    if has_api is True:
+        linked = select(MatchExternalId.match_id)
+        stmt = stmt.where(Match.id.in_(linked))
+        count_stmt = count_stmt.where(Match.id.in_(linked))
+    elif has_api is False:
+        linked = select(MatchExternalId.match_id)
+        stmt = stmt.where(Match.id.not_in(linked))
+        count_stmt = count_stmt.where(Match.id.not_in(linked))
 
     total = await db.scalar(count_stmt) or 0
     stmt = (
@@ -84,8 +108,12 @@ async def list_matches(
         .limit(limit)
     )
     matches = (await db.scalars(stmt)).all()
+    meta_map = await load_list_meta(db, [m.id for m in matches])
+
+    items = [_brief(m, meta_map.get(m.id)) for m in matches]
+
     return AdminMatchesList(
-        items=[_brief(m) for m in matches],
+        items=items,
         page=page,
         limit=limit,
         total=total,
@@ -104,6 +132,9 @@ async def get_match(
         .options(
             selectinload(Match.predictions).selectinload(Prediction.bets),
             selectinload(Match.predictions).selectinload(Prediction.source),
+            selectinload(Match.external_ids),
+            selectinload(Match.stats),
+            selectinload(Match.lineups),
         )
     )
     if not match:
@@ -133,12 +164,16 @@ async def get_match(
             )
         )
 
+    meta_map = await load_list_meta(db, [match.id])
+    bundle = await load_match_api_bundle(db, match)
+
     return AdminMatchDetail(
-        match=_brief(match),
+        match=_brief(match, meta_map.get(match.id)),
         predictions=preds,
         ai_summary=match.ai_summary,
         ai_top_pick=match.ai_top_pick,
         ai_confidence=match.ai_confidence,
         ai_generated_at=match.ai_generated_at,
         ai_model=match.ai_model,
+        api_data=AdminMatchApiData.model_validate(bundle),
     )

@@ -76,3 +76,17 @@ class ApiFootballClient:
 
     async def get_fixture_lineups(self, fixture_id: str | int) -> list[dict]:
         return await self._get("/fixtures/lineups", {"fixture": fixture_id})
+
+    async def get_account_status(self) -> dict[str, Any]:
+        """Лимиты аккаунта: GET /status (не расходует лимит fixtures)."""
+        if not self.enabled:
+            return {}
+        headers = {
+            "x-apisports-key": self.api_key,
+            "x-rapidapi-key": self.api_key,
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{BASE_URL}/status", headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+        return data.get("response") or {}

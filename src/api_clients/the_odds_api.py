@@ -53,3 +53,23 @@ class TheOddsApiClient:
             f"/sports/{sport_key}/odds",
             {"regions": regions, "markets": markets, "oddsFormat": "decimal"},
         )
+
+    async def get_quota(self) -> dict[str, int | None]:
+        """Остаток кредитов из заголовков (GET /sports не считается в квоту)."""
+        if not self.enabled:
+            return {"remaining": None, "used": None}
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{BASE_URL}/sports",
+                params={"apiKey": self.api_key},
+            )
+            resp.raise_for_status()
+        def _int(h: str) -> int | None:
+            try:
+                return int(resp.headers.get(h, ""))
+            except ValueError:
+                return None
+        return {
+            "remaining": _int("x-requests-remaining"),
+            "used": _int("x-requests-used"),
+        }
