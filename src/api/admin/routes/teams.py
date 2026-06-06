@@ -33,7 +33,7 @@ ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".webp", ".svg"}
 def _logo_url(team: Team) -> Optional[str]:
     if team.logo_path:
         return f"/uploads/teams/{Path(team.logo_path).name}"
-    return None
+    return team.logo_url
 
 
 def _team_out(team: Team) -> TeamOut:

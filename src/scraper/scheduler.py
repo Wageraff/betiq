@@ -134,13 +134,32 @@ def main() -> None:
             replace_existing=True,
             **_JOB_KW,
         )
+
+    if settings.api_sync_enabled:
+        from src.api_clients import jobs as api_jobs
+
+        _api_jobs = [
+            (api_jobs.job_sync_leagues, "0 6 * * *", "api_sync_leagues"),
+            (api_jobs.job_sync_team_logos, "0 7 * * 1", "api_sync_team_logos"),
+            (api_jobs.job_link_matches, "*/15 * * * *", "api_link_matches"),
+            (api_jobs.job_fetch_team_form, "0 */6 * * *", "api_fetch_team_form"),
+            (api_jobs.job_fetch_lineups, "0,30 * * * *", "api_fetch_lineups"),
+            (api_jobs.job_fetch_odds_football, "*/10 * * * *", "api_fetch_odds_fb"),
+            (api_jobs.job_fetch_odds_other, "*/20 * * * *", "api_fetch_odds_other"),
+            (api_jobs.job_fetch_post_match_stats, "*/5 * * * *", "api_post_match_stats"),
+            (api_jobs.job_cleanup_ai_cache, "0 4 * * *", "api_cleanup_ai_cache"),
+        ]
+        for fn, cron, jid in _api_jobs:
+            scheduler.add_job(fn, CronTrigger.from_crontab(cron), id=jid, **_JOB_KW)
+
     scheduler.start()
     log.info(
         "Scheduler started (full %sh limit=%s, quick hourly :15 limit=%s, "
-        "AI 2h, health 08:00 UTC, digest 08:05 UTC)",
+        "AI 2h, health 08:00 UTC, digest 08:05 UTC, api_sync=%s)",
         "4",
         settings.scrape_full_limit,
         settings.scrape_quick_limit,
+        settings.api_sync_enabled,
     )
 
     for sig in (signal.SIGINT, signal.SIGTERM):

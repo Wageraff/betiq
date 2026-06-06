@@ -30,6 +30,7 @@ _proxy_sessions = _cfg["proxy_sessions"] if _cfg.has_section("proxy_sessions") e
 _datetime = _cfg["datetime"] if _cfg.has_section("datetime") else {}
 _logging = _cfg["logging"] if _cfg.has_section("logging") else {}
 _telegram = _cfg["telegram"] if _cfg.has_section("telegram") else {}
+_api_sync = _cfg["api_sync"] if _cfg.has_section("api_sync") else {}
 _ai = _cfg["ai"] if _cfg.has_section("ai") else {}
 
 
@@ -109,6 +110,11 @@ class Settings(BaseSettings):
     telegram_morning_digest_enabled: bool = _telegram.getboolean(
         "morning_digest_enabled", fallback=True
     )
+
+    api_football_key: str = ""
+    the_odds_api_key: str = ""
+    api_sync_enabled: bool = _api_sync.getboolean("enabled", fallback=False)
+    api_link_batch_size: int = int(_api_sync.get("link_batch_size", fallback=50))
 
 
 settings = Settings()

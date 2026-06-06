@@ -1,21 +1,27 @@
 """SQLAlchemy 2.0 models — схема из ТЗ раздел 3."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy import (
     Boolean,
+    CHAR,
+    Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
     Numeric,
+    SmallInteger,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -73,6 +79,8 @@ class Team(Base):
     display_name: Mapped[str] = mapped_column(String(150), nullable=False)
     sport: Mapped[Optional[str]] = mapped_column(String(50))
     logo_path: Mapped[Optional[str]] = mapped_column(String(500))
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500))
+    logo_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     aliases: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -80,6 +88,77 @@ class Team(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    external_ids: Mapped[List["TeamExternalId"]] = relationship(back_populates="team")
+
+
+class Competition(Base):
+    __tablename__ = "competitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sport: Mapped[str] = mapped_column(String(50), nullable=False)
+    country: Mapped[Optional[str]] = mapped_column(String(100))
+    country_code: Mapped[Optional[str]] = mapped_column(String(5))
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500))
+    flag_url: Mapped[Optional[str]] = mapped_column(String(500))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    external_ids: Mapped[List["CompetitionExternalId"]] = relationship(
+        back_populates="competition"
+    )
+
+    __table_args__ = (
+        Index("idx_competitions_name_sport", func.lower(name), sport, unique=True),
+    )
+
+
+class CompetitionExternalId(Base):
+    __tablename__ = "competition_external_ids"
+
+    competition_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("competitions.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    external_name: Mapped[Optional[str]] = mapped_column(String(200))
+    season: Mapped[Optional[str]] = mapped_column(String(10))
+
+    competition: Mapped["Competition"] = relationship(back_populates="external_ids")
+
+
+class TeamExternalId(Base):
+    __tablename__ = "team_external_ids"
+
+    team_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    external_name: Mapped[Optional[str]] = mapped_column(String(200))
+    verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+    team: Mapped["Team"] = relationship(back_populates="external_ids")
+
+
+class MatchExternalId(Base):
+    __tablename__ = "match_external_ids"
+    __table_args__ = (Index("idx_match_ext_provider_id", "provider", "external_id"),)
+
+    match_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("matches.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    linked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    link_method: Mapped[str] = mapped_column(String(20), default="auto", server_default="auto")
+    confidence: Mapped[Optional[float]] = mapped_column(Float)
+
+    match: Mapped["Match"] = relationship(back_populates="external_ids")
 
 
 class Match(Base):
@@ -90,6 +169,8 @@ class Match(Base):
         Index("idx_matches_sport", "sport"),
         Index("idx_matches_team_home_id", "team_home_id"),
         Index("idx_matches_team_away_id", "team_away_id"),
+        Index("idx_matches_status", "status"),
+        Index("idx_matches_competition_id", "competition_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -104,7 +185,21 @@ class Match(Base):
     )
     sport: Mapped[Optional[str]] = mapped_column(String(50))
     competition: Mapped[Optional[str]] = mapped_column(String(150))
+    competition_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("competitions.id", ondelete="SET NULL")
+    )
     match_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    status: Mapped[Optional[str]] = mapped_column(String(20))
+    venue_name: Mapped[Optional[str]] = mapped_column(String(200))
+    venue_city: Mapped[Optional[str]] = mapped_column(String(100))
+    season: Mapped[Optional[str]] = mapped_column(String(10))
+    round: Mapped[Optional[str]] = mapped_column(String(50))
+    score_home: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    score_away: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    score_ht_home: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    score_ht_away: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    stats_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    odds_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     slug: Mapped[Optional[str]] = mapped_column(String(300), unique=True)
     ai_summary: Mapped[Optional[str]] = mapped_column(Text)
     ai_top_pick: Mapped[Optional[str]] = mapped_column(String(200))
@@ -125,7 +220,187 @@ class Match(Base):
     team_away_ref: Mapped[Optional["Team"]] = relationship(
         foreign_keys=[team_away_id], lazy="joined"
     )
+    competition_ref: Mapped[Optional["Competition"]] = relationship(
+        foreign_keys=[competition_id]
+    )
     predictions: Mapped[List["Prediction"]] = relationship(back_populates="match")
+    external_ids: Mapped[List["MatchExternalId"]] = relationship(back_populates="match")
+    stats: Mapped[List["MatchStats"]] = relationship(back_populates="match")
+    lineups: Mapped[List["MatchLineup"]] = relationship(back_populates="match")
+    odds: Mapped[List["MatchOdds"]] = relationship(back_populates="match")
+
+
+class MatchStats(Base):
+    __tablename__ = "match_stats"
+    __table_args__ = (
+        UniqueConstraint("match_id", "side", "half", name="uq_match_stats_side_half"),
+        Index("idx_match_stats_match_id", "match_id"),
+        Index("idx_match_stats_team_id", "team_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=False
+    )
+    team_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="SET NULL")
+    )
+    side: Mapped[str] = mapped_column(String(5), nullable=False)
+    half: Mapped[str] = mapped_column(String(5), default="full", server_default="full")
+    shots_on_goal: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    shots_off_goal: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    shots_total: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    shots_blocked: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    shots_insidebox: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    shots_outsidebox: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    corners: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    fouls: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    yellow_cards: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    red_cards: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    offsides: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    possession: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    passes_total: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    passes_accurate: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    goalkeeper_saves: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    match: Mapped["Match"] = relationship(back_populates="stats")
+
+
+class TeamForm(Base):
+    __tablename__ = "team_form"
+    __table_args__ = (
+        UniqueConstraint("team_id", "fixture_external_id", name="uq_team_form_fixture"),
+        Index("idx_team_form_team_date", "team_id", "match_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
+    fixture_external_id: Mapped[Optional[str]] = mapped_column(String(50))
+    match_date: Mapped[date] = mapped_column(Date, nullable=False)
+    opponent_name: Mapped[Optional[str]] = mapped_column(String(150))
+    opponent_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="SET NULL")
+    )
+    is_home: Mapped[Optional[bool]] = mapped_column(Boolean)
+    result: Mapped[Optional[str]] = mapped_column(CHAR(1))
+    goals_scored: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    goals_conceded: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    corners_for: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    corners_against: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    yellow_cards: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    competition_name: Mapped[Optional[str]] = mapped_column(String(150))
+
+
+class MatchLineup(Base):
+    __tablename__ = "match_lineups"
+    __table_args__ = (UniqueConstraint("match_id", "side", name="uq_match_lineups_side"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=False
+    )
+    team_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="SET NULL")
+    )
+    side: Mapped[Optional[str]] = mapped_column(String(5))
+    formation: Mapped[Optional[str]] = mapped_column(String(20))
+    coach_name: Mapped[Optional[str]] = mapped_column(String(150))
+    coach_photo_url: Mapped[Optional[str]] = mapped_column(String(500))
+    lineup_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    match: Mapped["Match"] = relationship(back_populates="lineups")
+
+
+class MatchOdds(Base):
+    __tablename__ = "match_odds"
+    __table_args__ = (
+        UniqueConstraint(
+            "match_id",
+            "bookmaker",
+            "market",
+            "outcome",
+            "is_live",
+            name="uq_match_odds_key",
+        ),
+        Index("idx_match_odds_match_id", "match_id"),
+        Index("idx_match_odds_sport", "sport"),
+        Index("idx_match_odds_bookmaker", "bookmaker"),
+        Index("idx_match_odds_market", "market"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=False
+    )
+    sport: Mapped[str] = mapped_column(String(50), nullable=False)
+    bookmaker: Mapped[str] = mapped_column(String(80), nullable=False)
+    market: Mapped[str] = mapped_column(String(80), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(100), nullable=False)
+    odds: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
+    point: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    is_live: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    match: Mapped["Match"] = relationship(back_populates="odds")
+
+
+class OddsHistory(Base):
+    __tablename__ = "odds_history"
+    __table_args__ = (
+        Index("idx_odds_history_match_id", "match_id"),
+        Index("idx_odds_history_significant", "is_significant", "recorded_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=False
+    )
+    bookmaker: Mapped[str] = mapped_column(String(80), nullable=False)
+    market: Mapped[str] = mapped_column(String(80), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(100), nullable=False)
+    odds_prev: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+    odds_curr: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
+    movement_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    direction: Mapped[Optional[str]] = mapped_column(CHAR(4))
+    is_significant: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AiChatCache(Base):
+    __tablename__ = "ai_chat_cache"
+    __table_args__ = (
+        Index("idx_ai_cache_key", "cache_key"),
+        Index("idx_ai_cache_expires", "expires_at"),
+        Index("idx_ai_cache_match", "match_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cache_key: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)
+    match_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("matches.id", ondelete="CASCADE")
+    )
+    question_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    language: Mapped[str] = mapped_column(String(10), nullable=False)
+    response_text: Mapped[str] = mapped_column(Text, nullable=False)
+    tokens_input: Mapped[Optional[int]] = mapped_column(Integer)
+    tokens_output: Mapped[Optional[int]] = mapped_column(Integer)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class Prediction(Base):
