@@ -209,6 +209,7 @@ class Match(Base):
     injuries_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     h2h_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     api_prediction_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    fields_refreshed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     slug: Mapped[Optional[str]] = mapped_column(String(300), unique=True)
     ai_summary: Mapped[Optional[str]] = mapped_column(Text)
     ai_top_pick: Mapped[Optional[str]] = mapped_column(String(200))

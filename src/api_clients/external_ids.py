@@ -1,7 +1,7 @@
 """CRUD для внешних ID."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,6 +101,7 @@ async def matches_without_provider(
     from src.db.models import Match
 
     now = datetime.now(timezone.utc)
+    since = now - timedelta(days=30)
     linked = select(MatchExternalId.match_id).where(
         MatchExternalId.provider == provider
     )
@@ -110,6 +111,7 @@ async def matches_without_provider(
         select(Match)
         .where(Match.id.not_in(linked))
         .where(Match.match_date.isnot(None))
+        .where(Match.match_date >= since)
         .order_by(upcoming_first, Match.match_date.asc())
         .limit(limit)
     )

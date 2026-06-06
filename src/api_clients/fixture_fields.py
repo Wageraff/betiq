@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.api_football import ApiFootballClient
@@ -95,6 +95,12 @@ async def refresh_linked_football_fields(
                 Match.sport == "football",
                 Match.match_date.isnot(None),
                 Match.match_date >= since,
+                # Пропускаем матчи с актуальными EN-полями — только кириллица или нет venue
+                or_(
+                    Match.fields_refreshed_at.is_(None),
+                    Match.venue_name.is_(None),
+                    Match.competition.op("~")("[\\u0400-\\u04FF]"),
+                ),
             )
         )
     ).all()
@@ -117,6 +123,7 @@ async def refresh_linked_football_fields(
             rows = await client.get_fixtures(fixture=fixture_id)
             if rows:
                 await apply_fixture_fields(session, match, rows[0])
+                match.fields_refreshed_at = datetime.now(timezone.utc)
                 updated += 1
         except Exception:
             continue
