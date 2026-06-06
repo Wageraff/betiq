@@ -90,18 +90,29 @@ async def sync_team_logo_from_api(
 
 
 async def matches_without_provider(
-    session: AsyncSession, provider: str, *, limit: int = 50
+    session: AsyncSession,
+    provider: str,
+    *,
+    limit: int = 50,
+    sport: str | None = None,
 ):
+    from sqlalchemy import case
+
     from src.db.models import Match
 
+    now = datetime.now(timezone.utc)
     linked = select(MatchExternalId.match_id).where(
         MatchExternalId.provider == provider
     )
+    # Сначала предстоящие (ближайшие), потом прошедшие — иначе ЧМ/lineups не доходят.
+    upcoming_first = case((Match.match_date >= now, 0), else_=1)
     q = (
         select(Match)
         .where(Match.id.not_in(linked))
         .where(Match.match_date.isnot(None))
-        .order_by(Match.match_date.asc())
+        .order_by(upcoming_first, Match.match_date.asc())
         .limit(limit)
     )
+    if sport:
+        q = q.where(Match.sport == sport)
     return list((await session.scalars(q)).all())

@@ -214,7 +214,12 @@ async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> di
         (PROVIDER_API_FOOTBALL, link_match_to_api_football),
         (PROVIDER_THE_ODDS_API, link_match_to_odds_api),
     ):
-        pending = await matches_without_provider(session, provider, limit=limit)
+        pending = await matches_without_provider(
+            session,
+            provider,
+            limit=limit,
+            sport="football" if provider == PROVIDER_API_FOOTBALL else None,
+        )
         for match in pending:
             stats["checked"] += 1
             try:
