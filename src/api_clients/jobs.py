@@ -9,6 +9,7 @@ from src.api_clients.competitions_sync import sync_leagues_from_api_football
 from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_team_external_id, sync_team_logo_from_api
 from src.api_clients.linker import link_unlinked_matches
+from src.api_clients.football_odds_sync import sync_api_football_odds
 from src.api_clients.odds_sync import sync_all_odds
 from src.api_clients.stats_sync import (
     sync_post_match_stats,
@@ -91,11 +92,16 @@ async def job_fetch_lineups() -> None:
 
 
 async def job_fetch_odds_football() -> None:
-    if not settings.the_odds_api_key:
+    if not settings.the_odds_api_key and not settings.api_football_odds_enabled:
         return
     async with async_session_factory() as session:
-        n = await sync_all_odds(session, football_only=True)
-        log.info("job_fetch_odds_football: %s lines", n)
+        n_odds = 0
+        n_af = 0
+        if settings.the_odds_api_key:
+            n_odds = await sync_all_odds(session, football_only=True)
+        if settings.api_football_odds_enabled and settings.api_football_key:
+            n_af = await sync_api_football_odds(session)
+        log.info("job_fetch_odds_football: odds_api=%s api_football=%s", n_odds, n_af)
 
 
 async def job_fetch_odds_other() -> None:

@@ -115,6 +115,16 @@ class Settings(BaseSettings):
     the_odds_api_key: str = ""
     api_sync_enabled: bool = _api_sync.getboolean("enabled", fallback=False)
     api_link_batch_size: int = int(_api_sync.get("link_batch_size", fallback=50))
+    the_odds_api_markets: str = _api_sync.get(
+        "odds_markets",
+        fallback="h2h,spreads,totals,btts,draw_no_bet,alternate_spreads,alternate_totals",
+    )
+    api_football_odds_enabled: bool = _api_sync.getboolean(
+        "api_football_odds_enabled", fallback=True
+    )
+    api_fixture_refresh_limit: int = int(
+        _api_sync.get("fixture_refresh_limit", fallback=80)
+    )
 
 
 settings = Settings()

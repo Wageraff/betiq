@@ -57,6 +57,19 @@ SPORT_ALIASES = {
     "motogp": "motorsport",
 }
 
+_MMA_COMPETITION_RE = re.compile(
+    r"\b(ufc|bellator|pfl|one\s+championship|mma|bare\s+knuckle)\b", re.I
+)
+
+
+def infer_sport_from_competition(competition: Optional[str]) -> Optional[str]:
+    """UFC/MMA в названии турнира → mma, даже если URL/раздел источника — tennis."""
+    if not competition:
+        return None
+    if _MMA_COMPETITION_RE.search(competition):
+        return "mma"
+    return None
+
 
 def normalize_sport(raw: Optional[str]) -> Optional[str]:
     if not raw:

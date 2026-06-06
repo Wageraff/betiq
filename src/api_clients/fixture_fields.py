@@ -1,13 +1,19 @@
 """Обновление полей матча из ответа API-Football (EN competition, round, venue)."""
 from __future__ import annotations
 
+import re
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.api_football import ApiFootballClient
 from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_match_external_id
-from src.db.models import CompetitionExternalId, Match, MatchExternalId
+from src.config import settings
+from src.db.models import Competition, CompetitionExternalId, Match, MatchExternalId
+
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 
 
 async def apply_fixture_fields(
@@ -34,6 +40,9 @@ async def apply_fixture_fields(
         )
         if cid:
             match.competition_id = cid
+            comp = await session.get(Competition, cid)
+            if comp and comp.name:
+                match.competition = comp.name
 
     status = (fix.get("status") or {}).get("short")
     if status:
@@ -60,33 +69,42 @@ async def apply_fixture_fields(
         match.score_ht_away = ht.get("away")
 
 
+def _competition_needs_api_refresh(competition: str | None) -> bool:
+    if not competition:
+        return True
+    return bool(_CYRILLIC_RE.search(competition))
+
+
 async def refresh_linked_football_fields(
-    session: AsyncSession, *, limit: int = 40
+    session: AsyncSession, *, limit: int | None = None
 ) -> int:
     """Обновить competition/round/venue у уже связанных предстоящих матчей."""
-    from datetime import datetime, timedelta, timezone
-
     client = ApiFootballClient()
     if not client.enabled:
         return 0
 
+    batch = limit if limit is not None else settings.api_fixture_refresh_limit
     since = datetime.now(timezone.utc) - timedelta(days=3)
     linked = select(MatchExternalId.match_id).where(
         MatchExternalId.provider == PROVIDER_API_FOOTBALL
     )
     matches = (
         await session.scalars(
-            select(Match)
-            .where(
+            select(Match).where(
                 Match.id.in_(linked),
                 Match.sport == "football",
                 Match.match_date.isnot(None),
                 Match.match_date >= since,
             )
-            .order_by(Match.match_date.asc())
-            .limit(limit)
         )
     ).all()
+    matches.sort(
+        key=lambda m: (
+            0 if _competition_needs_api_refresh(m.competition) else 1,
+            m.match_date or datetime.max.replace(tzinfo=timezone.utc),
+        )
+    )
+    matches = matches[:batch]
 
     updated = 0
     for match in matches:

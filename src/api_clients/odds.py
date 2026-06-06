@@ -122,3 +122,33 @@ async def ingest_odds_api_event(
                 count += 1
     match.odds_fetched_at = datetime.now(timezone.utc)
     return count
+
+
+async def ingest_api_football_odds(
+    session: AsyncSession, match: Match, odds_payload: dict
+) -> int:
+    """Разобрать ответ API-Football GET /odds для одного fixture."""
+    count = 0
+    sport = match.sport or "football"
+    for bookmaker in odds_payload.get("bookmakers") or []:
+        bk = (bookmaker.get("name") or str(bookmaker.get("id") or "unknown")).strip()
+        for bet in bookmaker.get("bets") or []:
+            market = (bet.get("name") or "unknown").strip()
+            for val in bet.get("values") or []:
+                outcome = (val.get("value") or "?").strip()
+                price = val.get("odd")
+                if price is None:
+                    continue
+                await upsert_match_odds(
+                    session,
+                    match.id,
+                    sport=sport,
+                    bookmaker=bk,
+                    market=market,
+                    outcome=outcome,
+                    odds=price,
+                )
+                count += 1
+    if count:
+        match.odds_fetched_at = datetime.now(timezone.utc)
+    return count

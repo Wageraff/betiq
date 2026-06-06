@@ -216,7 +216,7 @@ async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> di
         await session.commit()
 
     try:
-        stats["refreshed"] = await refresh_linked_football_fields(session, limit=40)
+        stats["refreshed"] = await refresh_linked_football_fields(session)
         await session.commit()
     except Exception:
         log.exception("refresh_linked_football_fields failed")

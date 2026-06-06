@@ -77,6 +77,9 @@ class ApiFootballClient:
     async def get_fixture_lineups(self, fixture_id: str | int) -> list[dict]:
         return await self._get("/fixtures/lineups", {"fixture": fixture_id})
 
+    async def get_fixture_odds(self, fixture_id: str | int) -> list[dict]:
+        return await self._get("/odds", {"fixture": fixture_id})
+
     async def get_account_status(self) -> dict[str, Any]:
         """Лимиты аккаунта: GET /status (не расходует лимит fixtures)."""
         if not self.enabled:

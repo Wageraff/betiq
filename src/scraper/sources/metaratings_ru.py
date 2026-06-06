@@ -16,6 +16,7 @@ from src.scraper.utils.html_clean import clean_article_html, html_to_plain_text
 from src.scraper.utils.match_datetime import parse_schema_start_date, to_storage_datetime
 from src.scraper.utils.normalizer import (
     default_kickoff_storage,
+    infer_sport_from_competition,
     normalize_sport,
     parse_date,
     parse_date_from_url,
@@ -545,6 +546,10 @@ async def parse_prediction(page: Any, url: str) -> Optional[dict]:
         competition = (raw.get("competition") or "").strip()
     if not competition:
         competition = _competition_from_slug(url)
+
+    inferred = infer_sport_from_competition(competition)
+    if inferred:
+        sport = inferred
 
     bets = _parse_bets(raw.get("betLines") or [], full_text)
     if not bets:

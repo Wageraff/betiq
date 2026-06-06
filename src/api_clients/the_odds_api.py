@@ -32,6 +32,9 @@ class TheOddsApiClient:
                 # Лига вне сезона или sport_key неактивен — не ошибка.
                 log.debug("The Odds API 404 (inactive): %s", path)
                 return []
+            if resp.status_code == 422:
+                log.warning("The Odds API invalid params: %s %s", path, resp.text[:200])
+                return []
             resp.raise_for_status()
             data = resp.json()
         if isinstance(data, list):
@@ -47,11 +50,12 @@ class TheOddsApiClient:
         sport_key: str,
         *,
         regions: str = "eu",
-        markets: str = "h2h,spreads,totals",
+        markets: str | None = None,
     ) -> list[dict]:
+        mkt = markets or settings.the_odds_api_markets
         return await self._get(
             f"/sports/{sport_key}/odds",
-            {"regions": regions, "markets": markets, "oddsFormat": "decimal"},
+            {"regions": regions, "markets": mkt, "oddsFormat": "decimal"},
         )
 
     async def get_quota(self) -> dict[str, int | None]:
