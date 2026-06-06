@@ -14,7 +14,7 @@ from src.api_clients.constants import (
     sport_for_odds_key,
 )
 from src.api_clients.external_ids import save_match_external_id
-from src.api_clients.fuzzy import fuzzy_match
+from src.api_clients.matching import event_matches_teams
 from src.api_clients.odds import ingest_odds_api_event
 from src.api_clients.the_odds_api import TheOddsApiClient
 from src.db.models import Match
@@ -63,7 +63,16 @@ async def _match_by_fuzzy(
         )
     candidates = (await session.scalars(stmt)).all()
     for m in candidates:
-        if fuzzy_match(home, m.team_home) and fuzzy_match(away, m.team_away):
+        if await event_matches_teams(
+            session,
+            event_home=home,
+            event_away=away,
+            home_id=m.team_home_id,
+            home_name=m.team_home,
+            away_id=m.team_away_id,
+            away_name=m.team_away,
+            sport=m.sport,
+        ):
             return m
     return None
 

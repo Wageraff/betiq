@@ -19,7 +19,7 @@ from src.api_clients.external_ids import (
     save_team_external_id,
     sync_team_logo_from_api,
 )
-from src.api_clients.fuzzy import fuzzy_match
+from src.api_clients.matching import event_matches_teams
 from src.api_clients.the_odds_api import TheOddsApiClient
 from src.db.models import Match
 
@@ -107,8 +107,15 @@ async def link_match_to_api_football(
     for f in fixtures:
         th = (f.get("teams") or {}).get("home", {})
         ta = (f.get("teams") or {}).get("away", {})
-        if fuzzy_match(th.get("name", ""), match.team_home) and fuzzy_match(
-            ta.get("name", ""), match.team_away
+        if await event_matches_teams(
+            session,
+            event_home=th.get("name", ""),
+            event_away=ta.get("name", ""),
+            home_id=match.team_home_id,
+            home_name=match.team_home,
+            away_id=match.team_away_id,
+            away_name=match.team_away,
+            sport=match.sport,
         ):
             fid = str((f.get("fixture") or {}).get("id"))
             await save_match_external_id(
@@ -173,8 +180,15 @@ async def link_match_to_odds_api(
         delta = abs((commence - match.match_date).total_seconds())
         if delta > 10800:
             continue
-        if fuzzy_match(event.get("home_team", ""), match.team_home) and fuzzy_match(
-            event.get("away_team", ""), match.team_away
+        if await event_matches_teams(
+            session,
+            event_home=event.get("home_team", ""),
+            event_away=event.get("away_team", ""),
+            home_id=match.team_home_id,
+            home_name=match.team_home,
+            away_id=match.team_away_id,
+            away_name=match.team_away,
+            sport=match.sport,
         ):
             await save_match_external_id(
                 session,
