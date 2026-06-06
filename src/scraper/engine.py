@@ -10,8 +10,8 @@ import logging
 import random
 import time
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Literal, Optional
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,9 +39,12 @@ from src.scraper.utils.match_key import find_or_create_match
 from src.scraper.utils.match_datetime import to_storage_datetime
 from src.scraper.utils.normalizer import is_upcoming_match
 from src.scraper.utils.url_filter import filter_scrape_urls
+from src.scraper.source_tiers import include_in_quick
 from src.scraper.utils import url_list_cache
 
 log = logging.getLogger("engine")
+
+ScrapeMode = Literal["full", "quick", "manual"]
 
 
 @dataclass(frozen=True)
@@ -90,6 +93,26 @@ def _filter_urls_for_scrape(
             max_days,
         )
     return filtered
+
+
+async def _should_skip_quick(session: AsyncSession, source_id: int) -> bool:
+    """Пропуск quick, если недавний запуск не сохранил новых прогнозов."""
+    skip_min = settings.scrape_skip_if_empty_minutes
+    if skip_min <= 0:
+        return False
+    last = await session.scalar(
+        select(ScrapeLog)
+        .where(ScrapeLog.source_id == source_id)
+        .order_by(ScrapeLog.started_at.desc())
+        .limit(1)
+    )
+    if not last or last.status == "error" or last.items_new > 0:
+        return False
+    started = last.started_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    age_min = (datetime.now(timezone.utc) - started).total_seconds() / 60
+    return age_min < skip_min
 
 
 async def _existing_urls(session: AsyncSession, urls: list[str]) -> set[str]:
@@ -386,6 +409,7 @@ async def run_scrape(
     limit: Optional[int] = None,
     *,
     force: bool = False,
+    mode: ScrapeMode = "manual",
 ) -> None:
     ensure_proxy_configured()
     async with browser_lifecycle():
@@ -398,6 +422,14 @@ async def run_scrape(
             rows = (await session.scalars(q)).all()
             snaps = [_snap_source(s) for s in rows]
 
+            if mode == "quick" and not source_name:
+                skipped_tier = [
+                    s.name for s in snaps if not include_in_quick(s.scraper_module)
+                ]
+                snaps = [s for s in snaps if include_in_quick(s.scraper_module)]
+                for name in skipped_tier:
+                    log.info("%s: skip quick (tier=low, full only)", name)
+
             if not snaps:
                 if source_name:
                     log.warning("Source not found: %s", source_name)
@@ -406,6 +438,13 @@ async def run_scrape(
                 return
 
             for snap in snaps:
+                if mode == "quick" and await _should_skip_quick(session, snap.id):
+                    log.info(
+                        "%s: skip quick (0 new within %s min)",
+                        snap.name,
+                        settings.scrape_skip_if_empty_minutes,
+                    )
+                    continue
                 await scrape_source(session, snap, limit=limit, force=force)
 
 

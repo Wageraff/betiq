@@ -8,10 +8,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.deps import require_admin
-from src.api.admin.schemas import ConfigSectionOut, SettingsOut, SourceOut, SourceUpdate
+from src.api.admin.schemas import (
+    ConfigSectionOut,
+    SettingsOut,
+    SourceOut,
+    SourceStatsOut,
+    SourceUpdate,
+)
 from src.api.deps import get_db
 from src.config import BASE_DIR, CONFIG_PATH, settings
 from src.db.models import Source
+from src.scraper.source_stats import load_source_stats
+from src.scraper.source_tiers import tier_for_module
 
 router = APIRouter(prefix="/settings", tags=["admin-settings"])
 
@@ -40,21 +48,42 @@ async def get_settings(
         preview = ""
 
     sources = (await db.scalars(select(Source).order_by(Source.id))).all()
+    stats_map = await load_source_stats(db, days=settings.source_stats_days)
+
+    def _source_out(s: Source) -> SourceOut:
+        row = stats_map.get(s.id)
+        stats = None
+        if row:
+            stats = SourceStatsOut(
+                runs=row.runs,
+                items_saved=row.items_saved,
+                errors=row.errors,
+                empty_runs=row.empty_runs,
+                error_rate=round(row.error_rate, 3),
+                save_rate=round(row.save_rate, 3),
+                health=row.health,
+                last_run_at=row.last_run_at,
+                last_error_at=row.last_error_at,
+                stats_days=settings.source_stats_days,
+            )
+        else:
+            stats = SourceStatsOut(stats_days=settings.source_stats_days)
+        return SourceOut(
+            id=s.id,
+            name=s.name,
+            scraper_module=s.scraper_module,
+            geo=s.geo,
+            is_active=s.is_active,
+            last_success_at=s.last_success_at,
+            tier=tier_for_module(s.scraper_module).value,
+            stats=stats,
+        )
+
     return SettingsOut(
         config_sections=_read_config_sections(),
         prompt_template_path=str(path),
         prompt_template_preview=preview,
-        sources=[
-            SourceOut(
-                id=s.id,
-                name=s.name,
-                scraper_module=s.scraper_module,
-                geo=s.geo,
-                is_active=s.is_active,
-                last_success_at=s.last_success_at,
-            )
-            for s in sources
-        ],
+        sources=[_source_out(s) for s in sources],
         admin_configured=bool(settings.admin_api_key),
         anthropic_configured=bool(settings.anthropic_api_key),
     )
@@ -76,6 +105,22 @@ async def update_source(
         source.notes = body.notes
     await db.commit()
     await db.refresh(source)
+    stats_map = await load_source_stats(db, days=settings.source_stats_days)
+    row = stats_map.get(source.id)
+    stats = SourceStatsOut(stats_days=settings.source_stats_days)
+    if row:
+        stats = SourceStatsOut(
+            runs=row.runs,
+            items_saved=row.items_saved,
+            errors=row.errors,
+            empty_runs=row.empty_runs,
+            error_rate=round(row.error_rate, 3),
+            save_rate=round(row.save_rate, 3),
+            health=row.health,
+            last_run_at=row.last_run_at,
+            last_error_at=row.last_error_at,
+            stats_days=settings.source_stats_days,
+        )
     return SourceOut(
         id=source.id,
         name=source.name,
@@ -83,4 +128,6 @@ async def update_source(
         geo=source.geo,
         is_active=source.is_active,
         last_success_at=source.last_success_at,
+        tier=tier_for_module(source.scraper_module).value,
+        stats=stats,
     )

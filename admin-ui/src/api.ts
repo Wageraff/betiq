@@ -112,17 +112,35 @@ export type Team = {
   aliases: string | null;
 };
 
+export type SourceStats = {
+  runs: number;
+  items_saved: number;
+  errors: number;
+  empty_runs: number;
+  error_rate: number;
+  save_rate: number;
+  health: "ok" | "warn" | "error" | "idle";
+  last_run_at: string | null;
+  last_error_at: string | null;
+  stats_days: number;
+};
+
+export type Source = {
+  id: number;
+  name: string;
+  scraper_module: string | null;
+  geo: string | null;
+  is_active: boolean;
+  last_success_at?: string | null;
+  tier?: "high" | "medium" | "low" | null;
+  stats?: SourceStats | null;
+};
+
 export type Settings = {
   config_sections: { name: string; values: Record<string, string> }[];
   prompt_template_path: string;
   prompt_template_preview: string;
-  sources: {
-    id: number;
-    name: string;
-    scraper_module: string | null;
-    geo: string | null;
-    is_active: boolean;
-  }[];
+  sources: Source[];
   admin_configured: boolean;
   anthropic_configured: boolean;
 };

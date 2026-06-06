@@ -1,5 +1,40 @@
-import { useEffect, useState } from "react";
-import { api, Settings } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { api, Settings, Source } from "../api";
+
+function fmtDt(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function pct(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
+function tierLabel(tier: Source["tier"]): string {
+  if (tier === "high") return "high";
+  if (tier === "low") return "low (full)";
+  return "medium";
+}
+
+function healthTitle(s: Source): string {
+  const st = s.stats;
+  if (!st || st.runs === 0) return "Нет запусков за период";
+  const parts = [
+    `Запусков: ${st.runs}`,
+    `Сохранено: ${st.items_saved}`,
+    `Ошибок: ${st.errors}`,
+    `Пустых: ${st.empty_runs}`,
+  ];
+  if (st.last_error_at) parts.push(`Посл. ошибка: ${fmtDt(st.last_error_at)}`);
+  return parts.join(" · ");
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -20,6 +55,22 @@ export default function SettingsPage() {
   useEffect(() => {
     load();
   }, []);
+
+  const statsDays = settings?.sources[0]?.stats?.stats_days ?? 7;
+
+  const sortedSources = useMemo(() => {
+    if (!settings) return [];
+    const order = { error: 0, warn: 1, idle: 2, ok: 3 };
+    return [...settings.sources].sort((a, b) => {
+      const ha = a.stats?.health ?? "idle";
+      const hb = b.stats?.health ?? "idle";
+      if (order[ha] !== order[hb]) return order[ha] - order[hb];
+      const ea = a.stats?.error_rate ?? 0;
+      const eb = b.stats?.error_rate ?? 0;
+      if (eb !== ea) return eb - ea;
+      return (b.stats?.items_saved ?? 0) - (a.stats?.items_saved ?? 0);
+    });
+  }, [settings]);
 
   const runAction = async (
     path: string,
@@ -63,42 +114,83 @@ export default function SettingsPage() {
         <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
           Промпт: {settings.prompt_template_path}
         </p>
-        <pre
-          className="log-box"
-          style={{ maxHeight: 160 }}
-        >
+        <pre className="log-box" style={{ maxHeight: 160 }}>
           {settings.prompt_template_preview}
         </pre>
       </div>
 
       <div className="panel">
         <h3>Источники</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Название</th>
-              <th>Модуль</th>
-              <th>GEO</th>
-              <th>Активен</th>
-            </tr>
-          </thead>
-          <tbody>
-            {settings.sources.map((s) => (
-              <tr key={s.id}>
-                <td>{s.name}</td>
-                <td>{s.scraper_module}</td>
-                <td>{s.geo}</td>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={s.is_active}
-                    onChange={(e) => toggleSource(s.id, e.target.checked)}
-                  />
-                </td>
+        <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: 0 }}>
+          Статистика за {statsDays} дн. · сортировка: проблемные сверху ·{" "}
+          <span className="health-dot error" /> ошибки ·{" "}
+          <span className="health-dot warn" /> внимание ·{" "}
+          <span className="health-dot ok" /> норма
+        </p>
+        <div className="table-wrap">
+          <table className="sources-table">
+            <thead>
+              <tr>
+                <th>Статус</th>
+                <th>Название</th>
+                <th>Модуль</th>
+                <th>Tier</th>
+                <th>GEO</th>
+                <th>Запусков</th>
+                <th>Сохранено</th>
+                <th>Ошибок</th>
+                <th>Пустых</th>
+                <th>Посл. запуск</th>
+                <th>Активен</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sortedSources.map((s) => {
+                const st = s.stats;
+                const health = st?.health ?? "idle";
+                return (
+                  <tr key={s.id} className={`source-row health-${health}`}>
+                    <td title={healthTitle(s)}>
+                      <span className={`health-dot ${health}`} />
+                    </td>
+                    <td>{s.name}</td>
+                    <td>
+                      <code>{s.scraper_module}</code>
+                    </td>
+                    <td>
+                      <span className={`badge tier-${s.tier ?? "medium"}`}>
+                        {tierLabel(s.tier)}
+                      </span>
+                    </td>
+                    <td>{s.geo}</td>
+                    <td>{st?.runs ?? 0}</td>
+                    <td className={st && st.items_saved === 0 ? "muted-num" : ""}>
+                      {st?.items_saved ?? 0}
+                      {st && st.runs > 0 && (
+                        <span className="sub-stat"> ({pct(st.save_rate)}/run)</span>
+                      )}
+                    </td>
+                    <td className={st && st.errors > 0 ? "error-num" : ""}>
+                      {st?.errors ?? 0}
+                      {st && st.runs > 0 && st.errors > 0 && (
+                        <span className="sub-stat"> ({pct(st.error_rate)})</span>
+                      )}
+                    </td>
+                    <td>{st?.empty_runs ?? 0}</td>
+                    <td className="dt-cell">{fmtDt(st?.last_run_at)}</td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={s.is_active}
+                        onChange={(e) => toggleSource(s.id, e.target.checked)}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="panel">

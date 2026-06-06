@@ -121,6 +121,21 @@ class AdminAiMatchBrief(BaseModel):
     ai_generated_at: Optional[datetime] = None
 
 
+class SourceStatsOut(BaseModel):
+    """Агрегаты scrape_logs за source_stats_days из config.ini."""
+
+    runs: int = 0
+    items_saved: int = 0
+    errors: int = 0
+    empty_runs: int = 0
+    error_rate: float = 0.0
+    save_rate: float = 0.0
+    health: str = "idle"
+    last_run_at: Optional[datetime] = None
+    last_error_at: Optional[datetime] = None
+    stats_days: int = 7
+
+
 class SourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -130,6 +145,8 @@ class SourceOut(BaseModel):
     geo: Optional[str] = None
     is_active: bool
     last_success_at: Optional[datetime] = None
+    tier: Optional[str] = None
+    stats: Optional[SourceStatsOut] = None
 
 
 class SourceUpdate(BaseModel):

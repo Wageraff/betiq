@@ -1,5 +1,5 @@
 """
-APScheduler: полный парсинг каждые 4ч, быстрый — каждые 30 мин.
+APScheduler: полный парсинг каждые 4ч, быстрый — в :15 каждый час.
 Запуск: python -m src.scraper.scheduler
 """
 from __future__ import annotations
@@ -55,14 +55,14 @@ async def job_repair_catalog() -> None:
 async def job_full_scrape() -> None:
     limit = settings.scrape_full_limit
     log.info("Scheduled: full scrape (limit=%s)", limit)
-    await run_scrape(limit=limit)
+    await run_scrape(limit=limit, mode="full")
     await job_repair_catalog()
 
 
 async def job_quick_scrape() -> None:
     limit = settings.scrape_quick_limit
     log.info("Scheduled: quick scrape (limit=%s)", limit)
-    await run_scrape(limit=limit)
+    await run_scrape(limit=limit, mode="quick")
 
 
 async def job_ai_summaries() -> None:
@@ -91,7 +91,7 @@ def main() -> None:
     )
     scheduler.add_job(
         job_quick_scrape,
-        CronTrigger.from_crontab("*/30 * * * *"),
+        CronTrigger.from_crontab("15 * * * *"),
         id="quick_scrape",
         replace_existing=True,
         **_JOB_KW,
@@ -119,7 +119,7 @@ def main() -> None:
     )
     scheduler.start()
     log.info(
-        "Scheduler started (full %sh limit=%s, quick 30m limit=%s, AI 2h, health 08:00 UTC)",
+        "Scheduler started (full %sh limit=%s, quick hourly :15 limit=%s, AI 2h, health 08:00 UTC)",
         "4",
         settings.scrape_full_limit,
         settings.scrape_quick_limit,

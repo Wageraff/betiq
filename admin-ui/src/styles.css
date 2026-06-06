@@ -140,6 +140,77 @@ th {
   color: var(--ok);
 }
 
+.badge.tier-high {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+.badge.tier-medium {
+  background: #334155;
+}
+
+.badge.tier-low {
+  background: #422006;
+  color: var(--warn);
+}
+
+.health-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #475569;
+}
+
+.health-dot.ok {
+  background: var(--ok);
+}
+
+.health-dot.warn {
+  background: var(--warn);
+}
+
+.health-dot.error {
+  background: #ef4444;
+}
+
+.health-dot.idle {
+  background: #64748b;
+}
+
+.source-row.health-error {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.source-row.health-warn {
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.sources-table {
+  font-size: 0.82rem;
+}
+
+.sources-table .sub-stat {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.sources-table .error-num {
+  color: #f87171;
+}
+
+.sources-table .muted-num {
+  color: var(--muted);
+}
+
+.sources-table .dt-cell {
+  white-space: nowrap;
+}
+
 .error {
   color: #f87171;
   margin: 0.5rem 0;

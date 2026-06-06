@@ -22,6 +22,10 @@ def _read_config() -> configparser.ConfigParser:
 
 _cfg = _read_config()
 _scraper = _cfg["scraper"] if _cfg.has_section("scraper") else {}
+
+
+def _parse_csv(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
 _proxy_sessions = _cfg["proxy_sessions"] if _cfg.has_section("proxy_sessions") else {}
 _datetime = _cfg["datetime"] if _cfg.has_section("datetime") else {}
 _logging = _cfg["logging"] if _cfg.has_section("logging") else {}
@@ -67,9 +71,9 @@ class Settings(BaseSettings):
         _scraper.get("proxy_error_cooldown_sec", fallback=60)
     )
     scrape_proxy_error_burst: int = int(_scraper.get("proxy_error_burst", fallback=5))
-    # Кэш URL с листингов (мин); 25 ≈ между quick scrape 30m. 0 = выкл.
+    # Кэш URL с листингов (мин); 55 ≈ между quick scrape 60m. 0 = выкл.
     scrape_url_list_cache_ttl_minutes: int = int(
-        _scraper.get("url_list_cache_ttl_minutes", fallback=25)
+        _scraper.get("url_list_cache_ttl_minutes", fallback=55)
     )
     # Блокировка image/font/media/stylesheet и типичной рекламы в Playwright
     scrape_block_heavy_resources: bool = _scraper.getboolean(
@@ -77,9 +81,13 @@ class Settings(BaseSettings):
     )
     # Если area-{geo} источника недоступен — проверяем прокси с этим geo (обычно RO)
     proxy_fallback_geo: str = _scraper.get("proxy_fallback_geo", fallback="GB")
-    # Лимиты scheduler: quick каждые 30m, full каждые 4h
-    scrape_quick_limit: int = int(_scraper.get("quick_scrape_limit", fallback=5))
+    # Лимиты scheduler: quick в :15 каждый час, full каждые 4h
+    scrape_quick_limit: int = int(_scraper.get("quick_scrape_limit", fallback=3))
     scrape_full_limit: int = int(_scraper.get("full_scrape_limit", fallback=20))
+    scrape_skip_if_empty_minutes: int = int(
+        _scraper.get("scrape_skip_if_empty_minutes", fallback=55)
+    )
+    source_stats_days: int = int(_scraper.get("source_stats_days", fallback=7))
 
     # IANA: в какой зоне на сайте показывают время матча (RO → Europe/Bucharest)
     match_datetime_source_tz: str = _datetime.get(
@@ -93,6 +101,19 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+source_tier_high = _parse_csv(
+    _scraper.get("source_tier_high", fallback="vseprosport_ru,stavkiprognozy_ru")
+)
+source_tier_medium = _parse_csv(
+    _scraper.get(
+        "source_tier_medium",
+        fallback="legalbet_ru,metaratings_ru,betonmobile_ru,legalbet",
+    )
+)
+source_tier_low = _parse_csv(
+    _scraper.get("source_tier_low", fallback="beturi,pontulzilei")
+)
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
