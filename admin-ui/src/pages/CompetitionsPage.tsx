@@ -99,8 +99,9 @@ export default function CompetitionsPage() {
     <>
       <h2>Лиги и синхронизация</h2>
       <p style={{ color: "var(--muted)" }}>
-        Поиск по названию (World Cup, Premier League, Russia…). По умолчанию показаны
-        только лиги с матчами в БД на ближайшие 7 дней.
+        Поиск по названию лиги, стране или тексту турнира в матчах (World Cup, ЧМ,
+        Russia…). «С матчами в БД» — лиги с предстоящими матчами (по{" "}
+        <code>competition_id</code> или полю <code>competition</code>).
       </p>
 
       {quota && (
@@ -137,6 +138,18 @@ export default function CompetitionsPage() {
         <button type="button" onClick={applySearch} disabled={loading}>
           Найти
         </button>
+        {qApplied && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              setQ("");
+              setQApplied("");
+            }}
+          >
+            Сбросить поиск
+          </button>
+        )}
         <select value={sport} onChange={(e) => setSport(e.target.value)}>
           <option value="">Все виды спорта</option>
           <option value="football">football</option>

@@ -4,10 +4,16 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.services.api_sync_admin import fetch_live_quotas
+from src.api.admin.services.competition_match_link import (
+    competition_search_clause,
+    upcoming_match_count_scalar,
+    upcoming_match_date_clause,
+    match_links_competition,
+)
 from src.api_clients.football_odds_sync import sync_api_football_odds
 from src.api_clients.odds_keys import odds_sport_keys_for_match
 from src.api_clients.odds_scope import upcoming_match_window
@@ -34,50 +40,6 @@ def _serialize_odds_markets(markets: list[str] | None) -> str | None:
     return json.dumps(markets)
 
 
-def _upcoming_match_counts_subquery(since: datetime, until: datetime):
-    return (
-        select(
-            Match.competition_id.label("competition_id"),
-            func.count().label("match_count"),
-        )
-        .where(
-            Match.competition_id.isnot(None),
-            Match.match_date.isnot(None),
-            Match.match_date >= since,
-            Match.match_date <= until,
-        )
-        .group_by(Match.competition_id)
-        .subquery()
-    )
-
-
-def _competition_filters(
-    *,
-    sport: str | None,
-    is_tracked: bool | None,
-    q: str | None,
-    with_matches: bool | None,
-    mc,
-):
-    clauses = []
-    if sport:
-        clauses.append(Competition.sport == sport)
-    if is_tracked is not None:
-        clauses.append(Competition.is_tracked.is_(is_tracked))
-    if q:
-        like = f"%{q.strip()}%"
-        clauses.append(
-            or_(
-                Competition.name.ilike(like),
-                Competition.country.ilike(like),
-                Competition.country_code.ilike(like),
-            )
-        )
-    if with_matches:
-        clauses.append(mc.c.match_count > 0)
-    return clauses
-
-
 async def list_competitions(
     session: AsyncSession,
     *,
@@ -90,45 +52,38 @@ async def list_competitions(
     limit: int = 50,
 ) -> tuple[list[dict], int]:
     since, until = upcoming_match_window()
-    mc = _upcoming_match_counts_subquery(since, until)
-    filters = _competition_filters(
-        sport=sport,
-        is_tracked=is_tracked,
-        q=q,
-        with_matches=with_matches,
-        mc=mc,
-    )
+    match_count = upcoming_match_count_scalar(since, until)
 
-    base = select(Competition, mc.c.match_count).outerjoin(
-        mc, Competition.id == mc.c.competition_id
-    )
-    count_stmt = (
-        select(func.count())
-        .select_from(Competition)
-        .outerjoin(mc, Competition.id == mc.c.competition_id)
-    )
-    for clause in filters:
+    base = select(Competition, match_count.label("match_count"))
+    count_stmt = select(func.count()).select_from(Competition)
+
+    if sport:
+        base = base.where(Competition.sport == sport)
+        count_stmt = count_stmt.where(Competition.sport == sport)
+    if is_tracked is not None:
+        base = base.where(Competition.is_tracked.is_(is_tracked))
+        count_stmt = count_stmt.where(Competition.is_tracked.is_(is_tracked))
+    if q and q.strip():
+        clause = competition_search_clause(q, since, until)
         base = base.where(clause)
         count_stmt = count_stmt.where(clause)
+    if with_matches:
+        base = base.where(match_count > 0)
+        count_stmt = count_stmt.where(match_count > 0)
 
     total = int(await session.scalar(count_stmt) or 0)
 
     if order == "matches":
-        base = base.order_by(
-            mc.c.match_count.desc().nullslast(),
-            Competition.name.asc(),
-        )
+        base = base.order_by(match_count.desc(), Competition.name.asc())
     else:
         base = base.order_by(Competition.name.asc())
 
     rows = (
-        await session.execute(
-            base.offset((page - 1) * limit).limit(limit)
-        )
+        await session.execute(base.offset((page - 1) * limit).limit(limit))
     ).all()
 
     items = []
-    for comp, match_count in rows:
+    for comp, mcount in rows:
         items.append(
             {
                 "id": comp.id,
@@ -136,7 +91,7 @@ async def list_competitions(
                 "sport": comp.sport,
                 "country": comp.country,
                 "country_code": comp.country_code,
-                "matches_upcoming": int(match_count or 0),
+                "matches_upcoming": int(mcount or 0),
                 "is_tracked": comp.is_tracked,
                 "sync_odds": comp.sync_odds,
                 "sync_stats": comp.sync_stats,
@@ -195,11 +150,11 @@ async def sync_competition_now(session: AsyncSession, competition_id: int) -> di
 
     matches = (
         await session.scalars(
-            select(Match).where(
-                Match.competition_id == competition_id,
-                Match.match_date.isnot(None),
-                Match.match_date >= since,
-                Match.match_date <= until,
+            select(Match)
+            .join(Competition, Competition.id == comp.id)
+            .where(
+                upcoming_match_date_clause(since, until),
+                match_links_competition(),
             )
         )
     ).all()
