@@ -14,7 +14,10 @@ from src.api_clients.linker import link_unlinked_matches
 from src.api_clients.odds_sync import sync_all_odds
 from src.api_clients.stats_sync import (
     sync_post_match_stats,
+    sync_prematch_api_predictions,
     sync_prematch_forms,
+    sync_prematch_h2h,
+    sync_prematch_injuries,
     sync_upcoming_lineups,
 )
 from src.api_clients.ai_cache import cleanup_expired_cache
@@ -131,6 +134,33 @@ async def job_fetch_post_match_stats() -> None:
     async with async_session_factory() as session:
         n = await sync_post_match_stats(session)
         log.info("job_fetch_post_match_stats: %s", n)
+
+
+async def job_fetch_injuries() -> None:
+    """Травмы и дисквалификации для матчей в ближайшие 48ч."""
+    if not settings.api_football_key:
+        return
+    async with async_session_factory() as session:
+        n = await sync_prematch_injuries(session, hours=48)
+        log.info("job_fetch_injuries: %s", n)
+
+
+async def job_fetch_h2h() -> None:
+    """H2H (последние очные встречи) для матчей в ближайшие 72ч — однократно."""
+    if not settings.api_football_key:
+        return
+    async with async_session_factory() as session:
+        n = await sync_prematch_h2h(session, hours=72)
+        log.info("job_fetch_h2h: %s", n)
+
+
+async def job_fetch_api_predictions() -> None:
+    """Прогнозы API-Football (/predictions) для матчей в ближайшие 48ч — однократно."""
+    if not settings.api_football_key:
+        return
+    async with async_session_factory() as session:
+        n = await sync_prematch_api_predictions(session, hours=48)
+        log.info("job_fetch_api_predictions: %s", n)
 
 
 async def job_cleanup_ai_cache() -> None:

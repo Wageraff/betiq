@@ -1,17 +1,27 @@
-"""Football: match_stats, team_form, lineups."""
+"""Football: match_stats, team_form, lineups, injuries, h2h, api_predictions."""
 from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.api_football import ApiFootballClient
 from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_match_external_id, get_team_external_id
 from src.api_clients.odds_scope import _competition_sync_clause, upcoming_matches
-from src.db.models import Competition, Match, MatchExternalId, MatchLineup, MatchStats, TeamForm
+from src.db.models import (
+    Competition,
+    Match,
+    MatchApiPrediction,
+    MatchExternalId,
+    MatchH2H,
+    MatchInjury,
+    MatchLineup,
+    MatchStats,
+    TeamForm,
+)
 
 log = logging.getLogger("stats_sync")
 
@@ -285,6 +295,255 @@ async def sync_upcoming_lineups(session: AsyncSession) -> int:
     n = 0
     for m in matches:
         if await fetch_lineups(session, m):
+            n += 1
+    await session.commit()
+    return n
+
+
+# ---------------------------------------------------------------------------
+# Injuries
+# ---------------------------------------------------------------------------
+
+async def fetch_injuries(session: AsyncSession, match: Match) -> bool:
+    """Загрузить травмы/дисквалификации для матча. Запрашивать за 48ч до kickoff."""
+    if match.sport != "football" or match.injuries_fetched_at is not None:
+        return False
+    fixture_id = await get_match_external_id(session, match.id, PROVIDER_API_FOOTBALL)
+    if not fixture_id:
+        return False
+    client = ApiFootballClient()
+    if not client.enabled:
+        return False
+
+    rows = await client.get_fixture_injuries(fixture_id)
+    if not rows:
+        match.injuries_fetched_at = datetime.now(timezone.utc)
+        return False
+
+    home_ext = await get_team_external_id(session, match.team_home_id, PROVIDER_API_FOOTBALL)
+    away_ext = await get_team_external_id(session, match.team_away_id, PROVIDER_API_FOOTBALL)
+
+    # Удалить старые записи перед перезаписью
+    await session.execute(
+        delete(MatchInjury).where(MatchInjury.match_id == match.id)
+    )
+
+    for row in rows:
+        player = row.get("player") or {}
+        team = row.get("team") or {}
+        team_ext_id = str(team.get("id") or "")
+        side = None
+        if home_ext and team_ext_id == str(home_ext):
+            side = "home"
+        elif away_ext and team_ext_id == str(away_ext):
+            side = "away"
+        elif fuzzy_side_home(team, match):
+            side = "home"
+        elif fuzzy_side_away(team, match):
+            side = "away"
+
+        player_name = player.get("name") or ""
+        if not player_name:
+            continue
+
+        session.add(
+            MatchInjury(
+                match_id=match.id,
+                team_id=match.team_home_id if side == "home" else (
+                    match.team_away_id if side == "away" else None
+                ),
+                team_name=team.get("name"),
+                side=side,
+                player_name=player_name,
+                player_id_ext=str(player.get("id") or "") or None,
+                position=player.get("type"),
+                injury_type=player.get("reason"),
+                reason=row.get("reason"),
+            )
+        )
+
+    match.injuries_fetched_at = datetime.now(timezone.utc)
+    return True
+
+
+async def sync_prematch_injuries(session: AsyncSession, *, hours: int = 48) -> int:
+    """Загружать травмы для матчей в ближайшие N часов."""
+    until = datetime.now(timezone.utc) + timedelta(hours=hours)
+    now = datetime.now(timezone.utc)
+    linked = await _linked_football_match_ids(session)
+    matches = [
+        m
+        for m in await upcoming_matches(session, sports={"football"}, for_stats_sync=True)
+        if m.id in linked
+        and m.match_date
+        and now <= m.match_date <= until
+        and m.injuries_fetched_at is None
+    ]
+    n = 0
+    for m in matches:
+        if await fetch_injuries(session, m):
+            n += 1
+    await session.commit()
+    return n
+
+
+# ---------------------------------------------------------------------------
+# H2H
+# ---------------------------------------------------------------------------
+
+async def fetch_h2h(session: AsyncSession, match: Match) -> bool:
+    """Загрузить последние 10 очных встреч. Запрашивать однократно при линковке."""
+    if match.sport != "football" or match.h2h_fetched_at is not None:
+        return False
+    home_ext = await get_team_external_id(session, match.team_home_id, PROVIDER_API_FOOTBALL)
+    away_ext = await get_team_external_id(session, match.team_away_id, PROVIDER_API_FOOTBALL)
+    if not home_ext or not away_ext:
+        return False
+    client = ApiFootballClient()
+    if not client.enabled:
+        return False
+
+    fixtures = await client.get_headtohead(home_ext, away_ext, last=10)
+    if not fixtures:
+        match.h2h_fetched_at = datetime.now(timezone.utc)
+        return False
+
+    for f in fixtures:
+        fix = f.get("fixture") or {}
+        fid = str(fix.get("id") or "")
+        if not fid:
+            continue
+        teams = f.get("teams") or {}
+        goals = f.get("goals") or {}
+        raw_date = (fix.get("date") or "")[:10] or None
+
+        existing = await session.scalar(
+            select(MatchH2H).where(
+                MatchH2H.match_id == match.id,
+                MatchH2H.fixture_external_id == fid,
+            )
+        )
+        if existing:
+            continue
+
+        session.add(
+            MatchH2H(
+                match_id=match.id,
+                fixture_external_id=fid,
+                match_date=date.fromisoformat(raw_date) if raw_date else None,
+                home_team=(teams.get("home") or {}).get("name"),
+                away_team=(teams.get("away") or {}).get("name"),
+                score_home=goals.get("home"),
+                score_away=goals.get("away"),
+                competition_name=(f.get("league") or {}).get("name"),
+                status=(fix.get("status") or {}).get("short"),
+            )
+        )
+
+    match.h2h_fetched_at = datetime.now(timezone.utc)
+    return True
+
+
+async def sync_prematch_h2h(session: AsyncSession, *, hours: int = 72) -> int:
+    """Загружать H2H для матчей в ближайшие N часов (однократно)."""
+    until = datetime.now(timezone.utc) + timedelta(hours=hours)
+    now = datetime.now(timezone.utc)
+    linked = await _linked_football_match_ids(session)
+    matches = [
+        m
+        for m in await upcoming_matches(session, sports={"football"}, for_stats_sync=True)
+        if m.id in linked
+        and m.match_date
+        and now <= m.match_date <= until
+        and m.h2h_fetched_at is None
+    ]
+    n = 0
+    for m in matches:
+        if await fetch_h2h(session, m):
+            n += 1
+    await session.commit()
+    return n
+
+
+# ---------------------------------------------------------------------------
+# API-Football Predictions (/predictions)
+# ---------------------------------------------------------------------------
+
+async def fetch_api_prediction(session: AsyncSession, match: Match) -> bool:
+    """Загрузить встроенный прогноз API-Football (вероятности, форма, совет)."""
+    if match.sport != "football" or match.api_prediction_fetched_at is not None:
+        return False
+    fixture_id = await get_match_external_id(session, match.id, PROVIDER_API_FOOTBALL)
+    if not fixture_id:
+        return False
+    client = ApiFootballClient()
+    if not client.enabled:
+        return False
+
+    rows = await client.get_fixture_predictions(fixture_id)
+    if not rows:
+        match.api_prediction_fetched_at = datetime.now(timezone.utc)
+        return False
+
+    data = rows[0]
+    pred = data.get("predictions") or {}
+    winner = pred.get("winner") or {}
+    percent = pred.get("percent") or {}
+    teams = data.get("teams") or {}
+    home_team = teams.get("home") or {}
+    away_team = teams.get("away") or {}
+
+    def _pct(val: str | None) -> int | None:
+        if not val:
+            return None
+        try:
+            return int(str(val).replace("%", "").strip())
+        except ValueError:
+            return None
+
+    existing = await session.scalar(
+        select(MatchApiPrediction).where(MatchApiPrediction.match_id == match.id)
+    )
+    payload = dict(
+        winner_team=winner.get("name"),
+        winner_comment=winner.get("comment"),
+        percent_home=_pct(percent.get("home")),
+        percent_draw=_pct(percent.get("draw")),
+        percent_away=_pct(percent.get("away")),
+        goals_home=str(pred.get("goals", {}).get("home") or "") or None,
+        goals_away=str(pred.get("goals", {}).get("away") or "") or None,
+        advice=pred.get("advice"),
+        form_home=(home_team.get("league") or {}).get("form"),
+        form_away=(away_team.get("league") or {}).get("form"),
+        raw_json=data,
+    )
+    if existing:
+        for k, v in payload.items():
+            setattr(existing, k, v)
+        existing.fetched_at = datetime.now(timezone.utc)
+    else:
+        session.add(MatchApiPrediction(match_id=match.id, **payload))
+
+    match.api_prediction_fetched_at = datetime.now(timezone.utc)
+    return True
+
+
+async def sync_prematch_api_predictions(session: AsyncSession, *, hours: int = 48) -> int:
+    """Загружать прогнозы API-Football для матчей в ближайшие N часов."""
+    until = datetime.now(timezone.utc) + timedelta(hours=hours)
+    now = datetime.now(timezone.utc)
+    linked = await _linked_football_match_ids(session)
+    matches = [
+        m
+        for m in await upcoming_matches(session, sports={"football"}, for_stats_sync=True)
+        if m.id in linked
+        and m.match_date
+        and now <= m.match_date <= until
+        and m.api_prediction_fetched_at is None
+    ]
+    n = 0
+    for m in matches:
+        if await fetch_api_prediction(session, m):
             n += 1
     await session.commit()
     return n

@@ -146,6 +146,10 @@ def main() -> None:
             (api_jobs.job_fetch_lineups, "0,30 * * * *", "api_fetch_lineups"),
             (api_jobs.job_fetch_odds, "*/10 * * * *", "api_fetch_odds"),
             (api_jobs.job_fetch_post_match_stats, "*/5 * * * *", "api_post_match_stats"),
+            # Injuries, H2H, API-Predictions — каждый час; пропускают уже загруженные
+            (api_jobs.job_fetch_injuries, "5 * * * *", "api_fetch_injuries"),
+            (api_jobs.job_fetch_h2h, "20 * * * *", "api_fetch_h2h"),
+            (api_jobs.job_fetch_api_predictions, "35 * * * *", "api_fetch_api_predictions"),
             (api_jobs.job_cleanup_ai_cache, "0 4 * * *", "api_cleanup_ai_cache"),
             (api_jobs.job_cleanup_old_data, "0 3 * * *", "api_cleanup_old_data"),
         ]
