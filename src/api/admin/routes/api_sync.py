@@ -9,10 +9,12 @@ from src.api.admin.schemas import (
     ActionResponse,
     ApiProviderQuotaOut,
     ApiSyncActionRequest,
+    ApiSyncCoverageOut,
     ApiSyncStatusOut,
 )
 from src.api.admin.services import actions as job_actions
 from src.api.admin.services.api_sync_admin import fetch_db_counts, fetch_live_quotas
+from src.api.admin.services.api_sync_coverage import fetch_sync_coverage
 from src.api.deps import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,11 +28,13 @@ async def api_sync_status(
 ):
     live = await fetch_live_quotas()
     counts = await fetch_db_counts(db)
+    coverage_raw = await fetch_sync_coverage(db)
     return ApiSyncStatusOut(
         api_sync_enabled=live["api_sync_enabled"],
         api_football=ApiProviderQuotaOut(**live["api_football"]),
         the_odds_api=ApiProviderQuotaOut(**live["the_odds_api"]),
         db_counts=counts,
+        coverage=ApiSyncCoverageOut(**coverage_raw),
     )
 
 

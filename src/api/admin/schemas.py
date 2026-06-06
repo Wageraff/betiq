@@ -311,8 +311,39 @@ class ApiProviderQuotaOut(BaseModel):
     error: Optional[str] = None
 
 
+class ApiSyncCoverageMatchOut(BaseModel):
+    id: int
+    team_home: str
+    team_away: str
+    competition: Optional[str] = None
+    match_date: Optional[datetime] = None
+    status: Optional[str] = None
+    has_api_football: bool = False
+    has_the_odds_api: bool = False
+    odds_count: int = 0
+    odds_fetched_at: Optional[datetime] = None
+    sport_keys: list[str] = Field(default_factory=list)
+
+
+class ApiSyncSportKeyOut(BaseModel):
+    sport_key: str
+    label: str
+    match_count: int
+    matches: list[ApiSyncCoverageMatchOut] = Field(default_factory=list)
+
+
+class ApiSyncCoverageOut(BaseModel):
+    odds_sync_mode: str
+    upcoming_football_total: int = 0
+    window: dict[str, object] = Field(default_factory=dict)
+    the_odds_api: dict[str, object] = Field(default_factory=dict)
+    api_football_odds: dict[str, object] = Field(default_factory=dict)
+    odds_in_db: dict[str, int] = Field(default_factory=dict)
+
+
 class ApiSyncStatusOut(BaseModel):
     api_sync_enabled: bool
     api_football: ApiProviderQuotaOut
     the_odds_api: ApiProviderQuotaOut
     db_counts: dict[str, int]
+    coverage: Optional[ApiSyncCoverageOut] = None

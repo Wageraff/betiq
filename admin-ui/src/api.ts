@@ -155,6 +155,56 @@ export type MatchApiData = {
   team_form_away: TeamFormRow[];
 };
 
+export type ApiCoverageMatch = {
+  id: number;
+  team_home: string;
+  team_away: string;
+  competition?: string | null;
+  match_date?: string | null;
+  status?: string | null;
+  has_api_football: boolean;
+  has_the_odds_api: boolean;
+  odds_count: number;
+  odds_fetched_at?: string | null;
+  sport_keys: string[];
+};
+
+export type ApiCoverageSportKey = {
+  sport_key: string;
+  label: string;
+  match_count: number;
+  matches: ApiCoverageMatch[];
+};
+
+export type ApiSyncCoverage = {
+  odds_sync_mode: string;
+  upcoming_football_total: number;
+  window: {
+    since?: string;
+    until?: string;
+    days_ahead?: number;
+    skip_finished_hours?: number;
+  };
+  the_odds_api: {
+    bulk_sport_keys?: ApiCoverageSportKey[];
+    bulk_sport_key_count?: number;
+    bulk_credits_per_run?: number;
+    bulk_markets?: string;
+    event_markets?: string;
+    event_match_count?: number;
+    event_credits_per_run?: number;
+    unmapped_match_count?: number;
+    unmapped_matches?: ApiCoverageMatch[];
+  };
+  api_football_odds: {
+    enabled?: boolean;
+    batch_size?: number;
+    queue_count?: number;
+    matches?: ApiCoverageMatch[];
+  };
+  odds_in_db: { api_football?: number; the_odds_api?: number };
+};
+
 export type ApiSyncStatus = {
   api_sync_enabled: boolean;
   api_football: {
@@ -171,6 +221,7 @@ export type ApiSyncStatus = {
     error?: string | null;
   };
   db_counts: Record<string, number>;
+  coverage?: ApiSyncCoverage | null;
 };
 
 export type PredictionBet = {

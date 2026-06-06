@@ -8,10 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.constants import (
-    ODDS_SPORT_KEYS_FOOTBALL,
     PROVIDER_THE_ODDS_API,
     SPORT_TO_ODDS_KEY,
     sport_for_odds_key,
+)
+from src.api_clients.odds_scope import (
+    sport_keys_for_odds_sync,
+    upcoming_football_matches,
 )
 from src.api_clients.external_ids import save_match_external_id
 from src.api_clients.matching import event_matches_teams
@@ -122,14 +125,22 @@ async def sync_linked_event_odds(
     if not client.enabled:
         return 0
 
+    upcoming_ids = {m.id for m in await upcoming_football_matches(session)}
+    if not upcoming_ids:
+        return 0
     stmt = (
         select(Match, MatchExternalId.external_id)
         .join(MatchExternalId, MatchExternalId.match_id == Match.id)
-        .where(MatchExternalId.provider == PROVIDER_THE_ODDS_API)
+        .where(
+            MatchExternalId.provider == PROVIDER_THE_ODDS_API,
+            Match.id.in_(upcoming_ids),
+        )
     )
     if football_only:
         stmt = stmt.where(Match.sport == "football")
-    stmt = stmt.limit(settings.the_odds_api_event_batch_size)
+    stmt = stmt.order_by(Match.match_date.asc()).limit(
+        settings.the_odds_api_event_batch_size
+    )
     rows = (await session.execute(stmt)).all()
 
     total = 0
@@ -153,7 +164,16 @@ async def sync_linked_event_odds(
 
 async def sync_all_odds(session: AsyncSession, *, football_only: bool = False) -> int:
     total = 0
-    keys = ODDS_SPORT_KEYS_FOOTBALL if football_only else list(SPORT_TO_ODDS_KEY.values())
+    if football_only:
+        keys = await sport_keys_for_odds_sync(session)
+        log.info(
+            "Odds sync mode=%s football keys=%s upcoming=%s",
+            settings.odds_sync_mode,
+            keys,
+            len(await upcoming_football_matches(session)),
+        )
+    else:
+        keys = list(SPORT_TO_ODDS_KEY.values())
     for key in keys:
         try:
             total += await sync_odds_for_sport_key(session, key)

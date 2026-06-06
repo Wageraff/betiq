@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +10,7 @@ from src.api_clients.api_football import ApiFootballClient
 from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_match_external_id
 from src.api_clients.odds import ingest_api_football_odds
+from src.api_clients.odds_scope import upcoming_football_matches
 from src.config import settings
 from src.db.models import Match, MatchExternalId
 
@@ -28,25 +28,15 @@ async def sync_api_football_odds(
         return 0
 
     batch = limit if limit is not None else settings.api_football_odds_batch_size
-    now = datetime.now(timezone.utc)
-    since = now - timedelta(days=1)
-    until = now + timedelta(days=settings.api_football_odds_days_ahead)
-    linked = select(MatchExternalId.match_id).where(
-        MatchExternalId.provider == PROVIDER_API_FOOTBALL
-    )
-    matches = (
+    all_upcoming = await upcoming_football_matches(session)
+    linked_ids = set(
         await session.scalars(
-            select(Match).where(
-                Match.id.in_(linked),
-                Match.sport == "football",
-                Match.match_date.isnot(None),
-                Match.match_date >= since,
-                Match.match_date <= until,
+            select(MatchExternalId.match_id).where(
+                MatchExternalId.provider == PROVIDER_API_FOOTBALL
             )
         )
-    ).all()
-    matches.sort(key=lambda m: m.match_date or datetime.max.replace(tzinfo=timezone.utc))
-    matches = matches[:batch]
+    )
+    matches = [m for m in all_upcoming if m.id in linked_ids][:batch]
 
     total = 0
     checked = 0
@@ -81,3 +71,15 @@ async def sync_api_football_odds(
         settings.api_football_odds_days_ahead,
     )
     return total
+
+
+async def upcoming_af_odds_match_ids(session: AsyncSession) -> list[int]:
+    """ID предстоящих football-матчей с привязкой API-Football (очередь /odds)."""
+    linked_ids = set(
+        await session.scalars(
+            select(MatchExternalId.match_id).where(
+                MatchExternalId.provider == PROVIDER_API_FOOTBALL
+            )
+        )
+    )
+    return [m.id for m in await upcoming_football_matches(session) if m.id in linked_ids]

@@ -138,6 +138,13 @@ class Settings(BaseSettings):
     api_fixture_refresh_limit: int = int(
         _api_sync.get("fixture_refresh_limit", fallback=80)
     )
+    odds_sync_mode: str = _api_sync.get("odds_sync_mode", fallback="db_matches")
+    odds_upcoming_days_ahead: int = int(
+        _api_sync.get("odds_upcoming_days_ahead", fallback=365)
+    )
+    odds_skip_finished_hours: int = int(
+        _api_sync.get("odds_skip_finished_hours", fallback=3)
+    )
 
 
 settings = Settings()

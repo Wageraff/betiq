@@ -1,5 +1,29 @@
 import { useEffect, useState } from "react";
-import { api, ApiSyncStatus } from "../api";
+import { Link } from "react-router-dom";
+import { api, ApiCoverageMatch, ApiSyncStatus } from "../api";
+
+const DATE_LOCALE = "en-US";
+
+function MatchLinks({ m }: { m: ApiCoverageMatch }) {
+  return (
+    <Link to={`/matches/${m.id}`}>
+      {m.team_home} — {m.team_away}
+    </Link>
+  );
+}
+
+function MatchBadges({ m }: { m: ApiCoverageMatch }) {
+  return (
+    <span style={{ whiteSpace: "nowrap" }}>
+      {m.has_api_football && <span className="badge ok" title="API-Football">AF</span>}
+      {m.has_the_odds_api && <span className="badge ok" title="The Odds API">O</span>}
+      {m.odds_count > 0 && <span className="badge">{m.odds_count}</span>}
+      {!m.has_api_football && !m.has_the_odds_api && (
+        <span className="badge tier-low" title="Нет привязки">—</span>
+      )}
+    </span>
+  );
+}
 
 const SYNC_ACTIONS: { id: string; label: string; hint: string }[] = [
   { id: "link", label: "Link matches", hint: "API-Football + Odds API" },
@@ -71,6 +95,7 @@ export default function ApiPage() {
   };
 
   const counts = status?.db_counts;
+  const cov = status?.coverage;
 
   return (
     <>
@@ -137,6 +162,124 @@ export default function ApiPage() {
             )}
           </section>
         </div>
+      )}
+
+      {cov && (
+        <section className="panel">
+          <h3>Очередь синка (сейчас в работе)</h3>
+          <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+            Режим: <strong>{cov.odds_sync_mode}</strong>
+            {cov.odds_sync_mode === "db_matches"
+              ? " — опрашиваются только лиги из предстоящих матчей в БД"
+              : " — опрашиваются все зашитые лиги"}
+            {" · "}
+            предстоящих football-матчей: {cov.upcoming_football_total}
+            {cov.window?.until && (
+              <>
+                {" · "}
+                окно до{" "}
+                {new Date(String(cov.window.until)).toLocaleDateString(DATE_LOCALE)}
+              </>
+            )}
+          </p>
+
+          <div className="api-grid" style={{ marginTop: "1rem" }}>
+            <div>
+              <h4>The Odds API — bulk</h4>
+              <p style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
+                Лиг за прогон: {cov.the_odds_api.bulk_sport_key_count ?? 0}
+                {" · "}
+                ~{cov.the_odds_api.bulk_credits_per_run ?? 0} кредитов
+                ({cov.the_odds_api.bulk_markets})
+              </p>
+              {(cov.the_odds_api.bulk_sport_keys ?? []).length === 0 ? (
+                <p style={{ color: "var(--muted)" }}>Нет лиг в очереди</p>
+              ) : (
+                (cov.the_odds_api.bulk_sport_keys ?? []).map((sk) => (
+                  <details key={sk.sport_key} style={{ marginBottom: 8 }}>
+                    <summary>
+                      <code>{sk.sport_key}</code> — {sk.label} ({sk.match_count})
+                    </summary>
+                    <table className="compact-table">
+                      <tbody>
+                        {sk.matches.map((m) => (
+                          <tr key={m.id}>
+                            <td><MatchLinks m={m} /></td>
+                            <td>{m.competition ?? "—"}</td>
+                            <td>
+                              {m.match_date
+                                ? new Date(m.match_date).toLocaleString(DATE_LOCALE)
+                                : "—"}
+                            </td>
+                            <td><MatchBadges m={m} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </details>
+                ))
+              )}
+              <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: 8 }}>
+                Event-odds ({cov.the_odds_api.event_markets}):{" "}
+                {cov.the_odds_api.event_match_count ?? 0} матчей
+                {" · "}
+                ~{cov.the_odds_api.event_credits_per_run ?? 0} кредитов
+              </p>
+            </div>
+
+            <div>
+              <h4>API-Football /odds</h4>
+              {cov.api_football_odds.enabled ? (
+                <>
+                  <p style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
+                    В очереди: {cov.api_football_odds.queue_count ?? 0}
+                    {" · "}
+                    batch {cov.api_football_odds.batch_size}
+                  </p>
+                  {(cov.api_football_odds.matches ?? []).length === 0 ? (
+                    <p style={{ color: "var(--muted)" }}>Нет связанных fixture</p>
+                  ) : (
+                    <table className="compact-table">
+                      <tbody>
+                        {(cov.api_football_odds.matches ?? []).map((m) => (
+                          <tr key={m.id}>
+                            <td><MatchLinks m={m} /></td>
+                            <td>{m.competition ?? "—"}</td>
+                            <td><MatchBadges m={m} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              ) : (
+                <p style={{ color: "var(--muted)" }}>api_football_odds_enabled = false</p>
+              )}
+            </div>
+          </div>
+
+          {(cov.the_odds_api.unmapped_match_count ?? 0) > 0 && (
+            <>
+              <h4 style={{ marginTop: "1rem" }}>
+                Без sport_key The Odds API ({cov.the_odds_api.unmapped_match_count})
+              </h4>
+              <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                Коэффициенты только через API-Football (если fixture связан)
+              </p>
+              <table className="compact-table">
+                <tbody>
+                  {(cov.the_odds_api.unmapped_matches ?? []).map((m) => (
+                    <tr key={m.id}>
+                      <td><MatchLinks m={m} /></td>
+                      <td>{m.competition ?? "—"}</td>
+                      <td><MatchBadges m={m} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </section>
       )}
 
       {counts && (
