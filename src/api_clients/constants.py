@@ -25,3 +25,12 @@ ODDS_SPORT_KEYS_FOOTBALL = [
     "soccer_france_ligue_one",
     "soccer_uefa_champs_league",
 ]
+
+
+def sport_for_odds_key(sport_key: str) -> str:
+    if sport_key.startswith("soccer_"):
+        return "football"
+    for sport, key in SPORT_TO_ODDS_KEY.items():
+        if key == sport_key:
+            return sport
+    return "unknown"

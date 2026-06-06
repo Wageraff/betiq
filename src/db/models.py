@@ -98,7 +98,7 @@ class Competition(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sport: Mapped[str] = mapped_column(String(50), nullable=False)
     country: Mapped[Optional[str]] = mapped_column(String(100))
-    country_code: Mapped[Optional[str]] = mapped_column(String(5))
+    country_code: Mapped[Optional[str]] = mapped_column(String(16))
     logo_url: Mapped[Optional[str]] = mapped_column(String(500))
     flag_url: Mapped[Optional[str]] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")

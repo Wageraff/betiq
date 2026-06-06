@@ -2,19 +2,34 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api_clients.constants import ODDS_SPORT_KEYS_FOOTBALL, SPORT_TO_ODDS_KEY
-from src.api_clients.external_ids import get_match_external_id
+from src.api_clients.constants import (
+    ODDS_SPORT_KEYS_FOOTBALL,
+    PROVIDER_THE_ODDS_API,
+    SPORT_TO_ODDS_KEY,
+    sport_for_odds_key,
+)
+from src.api_clients.external_ids import save_match_external_id
 from src.api_clients.fuzzy import fuzzy_match
 from src.api_clients.odds import ingest_odds_api_event
-from src.api_clients.constants import PROVIDER_THE_ODDS_API
 from src.api_clients.the_odds_api import TheOddsApiClient
 from src.db.models import Match
 
 log = logging.getLogger("odds_sync")
+
+
+def _parse_commence(iso: str) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
 
 
 async def _match_by_odds_event_id(session: AsyncSession, event_id: str) -> Match | None:
@@ -31,26 +46,55 @@ async def _match_by_odds_event_id(session: AsyncSession, event_id: str) -> Match
     return await session.get(Match, row.match_id)
 
 
+async def _match_by_fuzzy(
+    session: AsyncSession,
+    *,
+    sport: str,
+    home: str,
+    away: str,
+    commence: datetime | None,
+) -> Match | None:
+    stmt = select(Match).where(Match.sport == sport)
+    if commence is not None:
+        window = timedelta(hours=3)
+        stmt = stmt.where(
+            Match.match_date >= commence - window,
+            Match.match_date <= commence + window,
+        )
+    candidates = (await session.scalars(stmt)).all()
+    for m in candidates:
+        if fuzzy_match(home, m.team_home) and fuzzy_match(away, m.team_away):
+            return m
+    return None
+
+
 async def sync_odds_for_sport_key(session: AsyncSession, sport_key: str) -> int:
     client = TheOddsApiClient()
     if not client.enabled:
         return 0
     events = await client.get_odds(sport_key)
+    sport = sport_for_odds_key(sport_key)
     count = 0
     for event in events:
-        match = await _match_by_odds_event_id(session, event.get("id", ""))
+        event_id = event.get("id", "")
+        match = await _match_by_odds_event_id(session, event_id)
         if not match:
-            home = event.get("home_team", "")
-            away = event.get("away_team", "")
-            candidates = (
-                await session.scalars(
-                    select(Match).where(Match.sport == "football").limit(200)
+            commence = _parse_commence(event.get("commence_time", ""))
+            match = await _match_by_fuzzy(
+                session,
+                sport=sport,
+                home=event.get("home_team", ""),
+                away=event.get("away_team", ""),
+                commence=commence,
+            )
+            if match and event_id:
+                await save_match_external_id(
+                    session,
+                    match.id,
+                    PROVIDER_THE_ODDS_API,
+                    event_id,
+                    confidence=0.85,
                 )
-            ).all()
-            for m in candidates:
-                if fuzzy_match(home, m.team_home) and fuzzy_match(away, m.team_away):
-                    match = m
-                    break
         if match:
             count += await ingest_odds_api_event(session, match, event)
     await session.commit()

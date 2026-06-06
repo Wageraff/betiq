@@ -69,7 +69,11 @@ def _apply_fixture_fields(match: Match, fixture: dict) -> None:
 
 
 async def link_match_to_api_football(
-    session: AsyncSession, match: Match, *, client: ApiFootballClient | None = None
+    session: AsyncSession,
+    match: Match,
+    *,
+    client: ApiFootballClient | None = None,
+    fixtures_by_date: dict[str, list[dict]] | None = None,
 ) -> bool:
     if match.sport not in API_FOOTBALL_SPORTS or not match.match_date:
         return False
@@ -96,7 +100,10 @@ async def link_match_to_api_football(
                 await _save_teams_from_fixture(session, match, f)
                 return True
 
-    fixtures = await client.get_fixtures(date=day)
+    cache = fixtures_by_date if fixtures_by_date is not None else {}
+    if day not in cache:
+        cache[day] = await client.get_fixtures(date=day)
+    fixtures = cache[day]
     for f in fixtures:
         th = (f.get("teams") or {}).get("home", {})
         ta = (f.get("teams") or {}).get("away", {})
@@ -140,7 +147,11 @@ async def _save_teams_from_fixture(
 
 
 async def link_match_to_odds_api(
-    session: AsyncSession, match: Match, *, client: TheOddsApiClient | None = None
+    session: AsyncSession,
+    match: Match,
+    *,
+    client: TheOddsApiClient | None = None,
+    events_by_sport: dict[str, list[dict]] | None = None,
 ) -> bool:
     if not match.match_date or not match.sport:
         return False
@@ -151,7 +162,10 @@ async def link_match_to_odds_api(
     if not client.enabled:
         return False
 
-    events = await client.get_events(sport_key)
+    cache = events_by_sport if events_by_sport is not None else {}
+    if sport_key not in cache:
+        cache[sport_key] = await client.get_events(sport_key)
+    events = cache[sport_key]
     for event in events:
         commence = _parse_commence(event.get("commence_time", ""))
         if not commence:
@@ -179,6 +193,8 @@ async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> di
     stats = {"api_football": 0, "the_odds_api": 0, "checked": 0}
     af = ApiFootballClient()
     odds = TheOddsApiClient()
+    fixtures_by_date: dict[str, list[dict]] = {}
+    events_by_sport: dict[str, list[dict]] = {}
 
     for provider, fn in (
         (PROVIDER_API_FOOTBALL, link_match_to_api_football),
@@ -189,11 +205,21 @@ async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> di
             stats["checked"] += 1
             try:
                 if provider == PROVIDER_API_FOOTBALL:
-                    ok = await fn(session, match, client=af)
+                    ok = await fn(
+                        session,
+                        match,
+                        client=af,
+                        fixtures_by_date=fixtures_by_date,
+                    )
                     if ok:
                         stats["api_football"] += 1
                 else:
-                    ok = await fn(session, match, client=odds)
+                    ok = await fn(
+                        session,
+                        match,
+                        client=odds,
+                        events_by_sport=events_by_sport,
+                    )
                     if ok:
                         stats["the_odds_api"] += 1
             except Exception:
