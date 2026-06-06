@@ -11,6 +11,7 @@ from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_team_external_id, sync_team_logo_from_api
 from src.api_clients.football_odds_sync import sync_api_football_odds
 from src.api_clients.linker import link_unlinked_matches
+from src.api_clients.odds_cleanup import clear_all_odds_data
 from src.api_clients.odds_sync import sync_all_odds
 from src.api_clients.stats_sync import (
     sync_post_match_stats,
@@ -95,7 +96,7 @@ async def job_fetch_lineups() -> None:
         log.info("job_fetch_lineups: %s", n)
 
 
-async def job_fetch_odds() -> None:
+async def job_fetch_odds(*, force: bool = False) -> None:
     """The Odds API — все виды спорта (db_matches) + API-Football /odds для football."""
     if not settings.the_odds_api_key and not settings.api_football_odds_enabled:
         return
@@ -104,7 +105,7 @@ async def job_fetch_odds() -> None:
     if settings.the_odds_api_key:
         async with async_session_factory() as session:
             try:
-                n_odds = await sync_all_odds(session, sports=None)
+                n_odds = await sync_all_odds(session, sports=None, force=force)
             except Exception:
                 await session.rollback()
                 log.exception("The Odds API sync failed")
@@ -115,7 +116,21 @@ async def job_fetch_odds() -> None:
             except Exception:
                 await session.rollback()
                 log.exception("API-Football odds sync failed")
-    log.info("job_fetch_odds: the_odds_api=%s api_football=%s", n_odds, n_af)
+    log.info(
+        "job_fetch_odds: the_odds_api=%s api_football=%s force=%s",
+        n_odds,
+        n_af,
+        force,
+    )
+
+
+async def job_reset_odds(*, refetch: bool = True) -> None:
+    """Удалить все коэффициенты в БД и опционально загрузить заново (текущий config)."""
+    async with async_session_factory() as session:
+        stats = await clear_all_odds_data(session)
+    log.info("job_reset_odds: cleared %s", stats)
+    if refetch:
+        await job_fetch_odds(force=True)
 
 
 async def job_fetch_odds_football() -> None:

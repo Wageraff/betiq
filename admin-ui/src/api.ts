@@ -263,6 +263,20 @@ export type PredictionDetail = {
   bets: PredictionBet[];
 };
 
+export type MatchApiPrediction = {
+  winner_team?: string | null;
+  winner_comment?: string | null;
+  percent_home?: number | null;
+  percent_draw?: number | null;
+  percent_away?: number | null;
+  goals_home?: string | null;
+  goals_away?: string | null;
+  advice?: string | null;
+  form_home?: string | null;
+  form_away?: string | null;
+  fetched_at?: string | null;
+};
+
 export type MatchDetail = {
   match: MatchBrief;
   predictions: PredictionDetail[];
@@ -271,6 +285,8 @@ export type MatchDetail = {
   ai_confidence: string | null;
   ai_generated_at: string | null;
   ai_model: string | null;
+  api_prediction?: MatchApiPrediction | null;
+  api_prediction_fetched_at?: string | null;
   api_data?: MatchApiData | null;
 };
 

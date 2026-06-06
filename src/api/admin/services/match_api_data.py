@@ -8,6 +8,7 @@ from src.api_clients.odds import odds_provider_for_market
 from src.config import settings
 from src.db.models import (
     Match,
+    MatchApiPrediction,
     MatchExternalId,
     MatchLineup,
     MatchOdds,
@@ -15,6 +16,24 @@ from src.db.models import (
     OddsHistory,
     TeamForm,
 )
+
+
+def serialize_api_prediction(pred: MatchApiPrediction | None) -> dict | None:
+    if not pred:
+        return None
+    return {
+        "winner_team": pred.winner_team,
+        "winner_comment": pred.winner_comment,
+        "percent_home": pred.percent_home,
+        "percent_draw": pred.percent_draw,
+        "percent_away": pred.percent_away,
+        "goals_home": pred.goals_home,
+        "goals_away": pred.goals_away,
+        "advice": pred.advice,
+        "form_home": pred.form_home,
+        "form_away": pred.form_away,
+        "fetched_at": pred.fetched_at,
+    }
 
 
 async def load_list_meta(

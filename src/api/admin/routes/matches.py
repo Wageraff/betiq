@@ -13,6 +13,7 @@ from src.api.admin.deps import require_admin
 from src.api.admin.schemas import (
     AdminBetOut,
     AdminMatchApiData,
+    AdminMatchApiPredictionOut,
     AdminMatchBrief,
     AdminMatchDetail,
     AdminMatchOddsList,
@@ -24,6 +25,7 @@ from src.api.admin.services.match_api_data import (
     load_match_api_bundle,
     load_match_odds_rows,
     load_odds_market_summary,
+    serialize_api_prediction,
 )
 from src.api.deps import get_db
 from src.db.models import Match, MatchExternalId, Prediction
@@ -178,6 +180,7 @@ async def get_match(
             selectinload(Match.external_ids),
             selectinload(Match.stats),
             selectinload(Match.lineups),
+            selectinload(Match.api_prediction),
         )
     )
     if not match:
@@ -210,6 +213,7 @@ async def get_match(
     meta_map = await load_list_meta(db, [match.id])
     bundle = await load_match_api_bundle(db, match, odds_market=odds_market)
 
+    api_pred_raw = serialize_api_prediction(match.api_prediction)
     return AdminMatchDetail(
         match=_brief(match, meta_map.get(match.id)),
         predictions=preds,
@@ -218,5 +222,11 @@ async def get_match(
         ai_confidence=match.ai_confidence,
         ai_generated_at=match.ai_generated_at,
         ai_model=match.ai_model,
+        api_prediction=(
+            AdminMatchApiPredictionOut.model_validate(api_pred_raw)
+            if api_pred_raw
+            else None
+        ),
+        api_prediction_fetched_at=match.api_prediction_fetched_at,
         api_data=AdminMatchApiData.model_validate(bundle),
     )

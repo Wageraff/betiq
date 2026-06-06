@@ -25,7 +25,12 @@ function MatchBadges({ m }: { m: ApiCoverageMatch }) {
   );
 }
 
-const SYNC_ACTIONS: { id: string; label: string; hint: string }[] = [
+const SYNC_ACTIONS: {
+  id: string;
+  label: string;
+  hint: string;
+  dangerous?: boolean;
+}[] = [
   { id: "link", label: "Link matches", hint: "API-Football + Odds API" },
   { id: "leagues", label: "Sync leagues", hint: "competitions" },
   { id: "odds", label: "Fetch odds", hint: "All sports (Odds API) + API-Football" },
@@ -35,6 +40,12 @@ const SYNC_ACTIONS: { id: string; label: string; hint: string }[] = [
   { id: "logos", label: "Team logos", hint: "API-Football CDN" },
   { id: "cleanup", label: "Cleanup AI cache", hint: "expired rows" },
   { id: "cleanup_data", label: "Cleanup old data", hint: "odds history, finished odds" },
+  {
+    id: "reset_odds",
+    label: "Reset odds & refetch",
+    hint: "Удалить ВСЕ match_odds + history, загрузить заново",
+    dangerous: true,
+  },
 ];
 
 function QuotaBar({ used, limit }: { used: number; limit: number }) {
@@ -74,7 +85,13 @@ export default function ApiPage() {
     load();
   }, []);
 
-  const run = async (action: string) => {
+  const run = async (action: string, dangerous?: boolean) => {
+    if (dangerous) {
+      const ok = window.confirm(
+        "Удалить ВСЕ коэффициенты (match_odds + odds_history) и загрузить заново по текущему config.ini?\n\nЛинковка матчей (AF/O) не затрагивается."
+      );
+      if (!ok) return;
+    }
     setError("");
     setLog([]);
     try {
@@ -323,7 +340,12 @@ export default function ApiPage() {
         <h3>Ручной запуск</h3>
         <div className="sync-actions">
           {SYNC_ACTIONS.map((a) => (
-            <button key={a.id} className="secondary" onClick={() => run(a.id)} title={a.hint}>
+            <button
+              key={a.id}
+              className={a.dangerous ? "warn-btn" : "secondary"}
+              onClick={() => run(a.id, a.dangerous)}
+              title={a.hint}
+            >
               {a.label}
             </button>
           ))}

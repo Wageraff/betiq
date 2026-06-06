@@ -104,6 +104,16 @@ button.secondary {
   background: #334155;
 }
 
+button.warn-btn {
+  background: #92400e;
+  border: 1px solid var(--warn);
+  color: #fff;
+}
+
+button.warn-btn:hover {
+  background: #b45309;
+}
+
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -532,6 +542,50 @@ th {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
   align-items: start;
+}
+
+.pagination-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.pagination-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.predictions-compare-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .predictions-compare-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.api-pred-percents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.prediction-ai-panel {
+  border-left: 3px solid var(--accent);
+}
+
+.prediction-api-panel {
+  border-left: 3px solid var(--ok);
 }
 
 .job-log {

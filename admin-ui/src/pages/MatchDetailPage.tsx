@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import {
   api,
   MatchApiData,
+  MatchApiPrediction,
   MatchDetail,
   MatchOddsList,
   PredictionDetail,
@@ -428,6 +429,110 @@ function ApiDataSection({
   );
 }
 
+function ApiPredictionPanel({
+  pred,
+  fetchedAt,
+  hasAfLink,
+  home,
+  away,
+}: {
+  pred?: MatchApiPrediction | null;
+  fetchedAt?: string | null;
+  hasAfLink: boolean;
+  home: string;
+  away: string;
+}) {
+  if (!pred && !fetchedAt && !hasAfLink) return null;
+
+  return (
+    <section className="panel prediction-api-panel">
+      <h3>API-Football prediction</h3>
+      <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: 0 }}>
+        Встроенный прогноз API-Football (/predictions) — отдельно от нашей AI-сводки.
+      </p>
+      {!pred ? (
+        <p style={{ color: "var(--muted)" }}>
+          {fetchedAt
+            ? "API ответил, но прогноз пустой."
+            : hasAfLink
+              ? "Прогноз ещё не загружен — дождитесь job_fetch_api_predictions или Sport API → sync."
+              : "Нет привязки API-Football (fixture_id)."}
+        </p>
+      ) : (
+        <>
+          {(pred.winner_team || pred.winner_comment) && (
+            <p>
+              <strong>Winner:</strong> {pred.winner_team ?? "—"}
+              {pred.winner_comment ? ` — ${pred.winner_comment}` : ""}
+            </p>
+          )}
+          {(pred.percent_home != null ||
+            pred.percent_draw != null ||
+            pred.percent_away != null) && (
+            <div className="api-pred-percents">
+              <span title={home}>
+                {home}: <strong>{pred.percent_home ?? "—"}%</strong>
+              </span>
+              <span>Draw: <strong>{pred.percent_draw ?? "—"}%</strong></span>
+              <span title={away}>
+                {away}: <strong>{pred.percent_away ?? "—"}%</strong>
+              </span>
+            </div>
+          )}
+          {(pred.goals_home || pred.goals_away) && (
+            <p>
+              <strong>Goals:</strong> {pred.goals_home ?? "—"} — {pred.goals_away ?? "—"}
+            </p>
+          )}
+          {(pred.form_home || pred.form_away) && (
+            <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
+              Form: {home} {pred.form_home ?? "—"} · {away} {pred.form_away ?? "—"}
+            </p>
+          )}
+          {pred.advice && (
+            <pre className="prediction-text" style={{ whiteSpace: "pre-wrap" }}>
+              {pred.advice}
+            </pre>
+          )}
+          {pred.fetched_at && (
+            <p style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
+              API-Football · {new Date(pred.fetched_at).toLocaleString(DATE_LOCALE)}
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function AiSummaryPanel({ data }: { data: MatchDetail }) {
+  if (!data.ai_summary) return null;
+  return (
+    <section className="panel prediction-ai-panel">
+      <h3>AI summary</h3>
+      <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: 0 }}>
+        Наша сводка по прогнозам источников (Claude).
+      </p>
+      {data.ai_top_pick && (
+        <p>
+          <strong>Top pick:</strong> {data.ai_top_pick}
+          {data.ai_confidence && ` (${data.ai_confidence})`}
+        </p>
+      )}
+      <pre className="prediction-text" style={{ whiteSpace: "pre-wrap" }}>
+        {data.ai_summary}
+      </pre>
+      {data.ai_model && (
+        <p style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
+          {data.ai_model}
+          {data.ai_generated_at &&
+            ` · ${new Date(data.ai_generated_at).toLocaleString(DATE_LOCALE)}`}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function MatchDetailPage() {
   const { id } = useParams();
   const [data, setData] = useState<MatchDetail | null>(null);
@@ -506,26 +611,20 @@ export default function MatchDetailPage() {
         />
       )}
 
-      {data.ai_summary && (
-        <section className="panel">
-          <h3>AI summary</h3>
-          {data.ai_top_pick && (
-            <p>
-              <strong>Top pick:</strong> {data.ai_top_pick}
-              {data.ai_confidence && ` (${data.ai_confidence})`}
-            </p>
-          )}
-          <pre className="prediction-text" style={{ whiteSpace: "pre-wrap" }}>
-            {data.ai_summary}
-          </pre>
-          {data.ai_model && (
-            <p style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
-              {data.ai_model}
-              {data.ai_generated_at &&
-                ` · ${new Date(data.ai_generated_at).toLocaleString(DATE_LOCALE)}`}
-            </p>
-          )}
-        </section>
+      {(data.ai_summary ||
+        data.api_prediction ||
+        data.api_prediction_fetched_at ||
+        m.has_api_football) && (
+        <div className="predictions-compare-row">
+          <AiSummaryPanel data={data} />
+          <ApiPredictionPanel
+            pred={data.api_prediction}
+            fetchedAt={data.api_prediction_fetched_at}
+            hasAfLink={m.has_api_football}
+            home={m.team_home}
+            away={m.team_away}
+          />
+        </div>
       )}
 
       <h3>Predictions by source</h3>

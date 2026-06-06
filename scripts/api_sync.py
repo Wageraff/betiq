@@ -36,6 +36,10 @@ async def main_async(action: str) -> None:
         await api_jobs.job_cleanup_ai_cache()
     elif action == "cleanup_data":
         await api_jobs.job_cleanup_old_data()
+    elif action == "reset_odds":
+        await api_jobs.job_reset_odds(refetch=True)
+    elif action == "reset_odds_only":
+        await api_jobs.job_reset_odds(refetch=False)
     else:
         raise SystemExit(f"Unknown action: {action}")
 
@@ -55,6 +59,8 @@ def main() -> None:
             "stats",
             "cleanup",
             "cleanup_data",
+            "reset_odds",
+            "reset_odds_only",
         ],
     )
     args = parser.parse_args()

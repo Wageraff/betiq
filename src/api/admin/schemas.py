@@ -207,6 +207,20 @@ class AdminMatchApiData(BaseModel):
     team_form_away: list[AdminTeamFormOut] = Field(default_factory=list)
 
 
+class AdminMatchApiPredictionOut(BaseModel):
+    winner_team: Optional[str] = None
+    winner_comment: Optional[str] = None
+    percent_home: Optional[int] = None
+    percent_draw: Optional[int] = None
+    percent_away: Optional[int] = None
+    goals_home: Optional[str] = None
+    goals_away: Optional[str] = None
+    advice: Optional[str] = None
+    form_home: Optional[str] = None
+    form_away: Optional[str] = None
+    fetched_at: Optional[datetime] = None
+
+
 class AdminMatchDetail(BaseModel):
     match: AdminMatchBrief
     predictions: list[AdminPredictionOut] = Field(default_factory=list)
@@ -215,6 +229,8 @@ class AdminMatchDetail(BaseModel):
     ai_confidence: Optional[str] = None
     ai_generated_at: Optional[datetime] = None
     ai_model: Optional[str] = None
+    api_prediction: Optional[AdminMatchApiPredictionOut] = None
+    api_prediction_fetched_at: Optional[datetime] = None
     api_data: Optional[AdminMatchApiData] = None
 
 

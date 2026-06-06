@@ -29,13 +29,25 @@ router = APIRouter(prefix="/competitions", tags=["admin-competitions"])
 async def get_competitions(
     sport: Optional[str] = None,
     is_tracked: Optional[bool] = None,
+    q: Optional[str] = Query(None, description="Поиск по названию или стране"),
+    with_matches: Optional[bool] = Query(
+        None, description="Только лиги с предстоящими матчами в БД"
+    ),
+    order: str = Query("name", pattern="^(name|matches)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     _: None = Depends(require_admin),
 ):
     items, total = await list_competitions(
-        db, sport=sport, is_tracked=is_tracked, page=page, limit=limit
+        db,
+        sport=sport,
+        is_tracked=is_tracked,
+        q=q,
+        with_matches=with_matches,
+        order=order,
+        page=page,
+        limit=limit,
     )
     quota = await api_quota_status(db)
     return CompetitionsListOut(
