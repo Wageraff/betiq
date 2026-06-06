@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, MatchApiData, MatchDetail, PredictionDetail } from "../api";
+import {
+  api,
+  MatchApiData,
+  MatchDetail,
+  MatchOddsList,
+  PredictionDetail,
+} from "../api";
 
 const DATE_LOCALE = "en-US";
 
@@ -57,54 +63,195 @@ function PredictionCard({ p }: { p: PredictionDetail }) {
   );
 }
 
-function OddsTable({ rows, title }: { rows: MatchApiData["odds"]; title: string }) {
-  if (rows.length === 0) return null;
+type ProviderFilter = "all" | "api_football" | "the_odds_api";
+
+function OddsPanel({ matchId, ad }: { matchId: number; ad: MatchApiData }) {
+  const markets = ad.odds_markets ?? [];
+  const initialMarket = ad.odds_market || markets[0]?.market || "";
+  const [market, setMarket] = useState(initialMarket);
+  const [rows, setRows] = useState(ad.odds ?? []);
+  const [loading, setLoading] = useState(false);
+  const [provider, setProvider] = useState<ProviderFilter>("all");
+
+  useEffect(() => {
+    if (!market) {
+      setRows([]);
+      return;
+    }
+    setLoading(true);
+    api
+      .get<MatchOddsList>(
+        `/matches/${matchId}/odds?market=${encodeURIComponent(market)}`
+      )
+      .then((r) => setRows(r.items))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [matchId, market]);
+
+  const activeMarket = markets.find((m) => m.market === market);
+  const marketTotal = activeMarket?.count ?? 0;
+  const filtered =
+    provider === "all"
+      ? rows
+      : rows.filter((o) => o.provider === provider);
+
+  if (ad.odds_total === 0 && markets.length === 0) {
+    return (
+      <p style={{ color: "var(--muted)" }}>
+        Коэффициентов в БД нет. Запустите{" "}
+        <Link to="/api">Fetch odds</Link> в разделе Sport API.
+      </p>
+    );
+  }
+
   return (
-    <>
-      <h4>{title} ({rows.length})</h4>
-      <div style={{ overflowX: "auto", maxHeight: 280, overflowY: "auto" }}>
-        <table className="compact-table">
-          <thead>
-            <tr>
-              <th>Bookmaker</th>
-              <th>Market</th>
-              <th>Outcome</th>
-              <th>Odds</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, 80).map((o, i) => (
-              <tr key={i}>
-                <td>{o.bookmaker}</td>
-                <td>{o.market}</td>
-                <td>{o.outcome}{o.point != null ? ` (${o.point})` : ""}</td>
-                <td>{o.odds}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="odds-panel">
+      <div className="odds-panel-head">
+        <h4 style={{ margin: 0 }}>
+          Odds — {ad.odds_total.toLocaleString()} в БД
+          {market && marketTotal > 0 && (
+            <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+              {" "}
+              · рынок «{market}»: {marketTotal.toLocaleString()}
+            </span>
+          )}
+        </h4>
+        {ad.odds_fetched_at && (
+          <span style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
+            обновлено{" "}
+            {new Date(ad.odds_fetched_at).toLocaleString(DATE_LOCALE)}
+          </span>
+        )}
       </div>
-    </>
+
+      {markets.length > 0 && (
+        <div className="market-pills">
+          {markets.map((m) => (
+            <button
+              key={m.market}
+              type="button"
+              className={`market-pill${market === m.market ? " active" : ""}`}
+              onClick={() => setMarket(m.market)}
+              title={`${m.provider} · ${m.count} строк`}
+            >
+              {m.market}
+              <span className="market-pill-count">{m.count}</span>
+              {m.provider === "api_football" && (
+                <span className="badge ok" style={{ marginLeft: 4 }}>
+                  AF
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="provider-tabs">
+        {(["all", "the_odds_api", "api_football"] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            className={provider === p ? "active" : ""}
+            onClick={() => setProvider(p)}
+          >
+            {p === "all"
+              ? "Все"
+              : p === "api_football"
+                ? "API-Football"
+                : "The Odds API"}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <p style={{ color: "var(--muted)" }}>Загрузка коэффициентов…</p>
+      ) : filtered.length === 0 ? (
+        <p style={{ color: "var(--muted)" }}>
+          Нет строк для выбранного рынка и фильтра.
+        </p>
+      ) : (
+        <>
+          <p style={{ color: "var(--muted)", fontSize: "0.85rem", margin: "0.5rem 0" }}>
+            Показано {filtered.length.toLocaleString()}
+            {marketTotal > filtered.length
+              ? ` из ${marketTotal.toLocaleString()} по рынку`
+              : ""}
+            {rows.length >= 500 ? " (лимит 500 на запрос)" : ""}
+          </p>
+          <div className="odds-table-wrap">
+            <table className="compact-table">
+              <thead>
+                <tr>
+                  <th>Bookmaker</th>
+                  <th>Outcome</th>
+                  <th>Odds</th>
+                  <th>Live</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((o, i) => (
+                  <tr key={i}>
+                    <td>
+                      {o.bookmaker}
+                      {o.provider === "api_football" && (
+                        <span className="badge ok" style={{ marginLeft: 4 }}>
+                          AF
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {o.outcome}
+                      {o.point != null ? ` (${o.point})` : ""}
+                    </td>
+                    <td>{o.odds}</td>
+                    <td>{o.is_live ? "yes" : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
-function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: string; away: string }) {
-  const oddsAf = ad.odds.filter((o) => o.provider === "api_football");
-  const oddsToa = ad.odds.filter((o) => o.provider !== "api_football");
+function ApiDataSection({
+  matchId,
+  api: ad,
+  home,
+  away,
+}: {
+  matchId: number;
+  api: MatchApiData;
+  home: string;
+  away: string;
+}) {
   const hasAfLink = ad.external_ids.some((e) => e.provider === "api_football");
 
   return (
     <section className="panel">
       <h3>Sport API data</h3>
-      <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: 0 }}>
-        Коэффициенты — ниже в блоках The Odds API (h2h, btts, …) и API-Football (Match Winner, Over/Under, …).
-        Загрузка: Sport API → Fetch odds.
-      </p>
-      <div className="match-meta" style={{ marginBottom: "1rem" }}>
+
+      <OddsPanel matchId={matchId} ad={ad} />
+
+      {hasAfLink && (ad.odds_total ?? 0) > 0 && (
+        <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+          API-Football и The Odds API могут дублировать рынки — переключайте рынки
+          кнопками выше.
+        </p>
+      )}
+
+      <div className="match-meta" style={{ margin: "1rem 0" }}>
         {ad.status && <span>Status: {ad.status}</span>}
         {ad.score && <span>Score: {ad.score}</span>}
         {ad.score_ht && <span>HT: {ad.score_ht}</span>}
-        {ad.venue_name && <span>{ad.venue_name}{ad.venue_city ? `, ${ad.venue_city}` : ""}</span>}
+        {ad.venue_name && (
+          <span>
+            {ad.venue_name}
+            {ad.venue_city ? `, ${ad.venue_city}` : ""}
+          </span>
+        )}
         {ad.season && <span>Season {ad.season}</span>}
         {ad.round && <span>{ad.round}</span>}
       </div>
@@ -124,8 +271,13 @@ function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: stri
               {ad.external_ids.map((e) => (
                 <tr key={e.provider}>
                   <td>{e.provider}</td>
-                  <td><code>{e.external_id}</code></td>
-                  <td>{e.link_method}{e.confidence != null ? ` (${e.confidence})` : ""}</td>
+                  <td>
+                    <code>{e.external_id}</code>
+                  </td>
+                  <td>
+                    {e.link_method}
+                    {e.confidence != null ? ` (${e.confidence})` : ""}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -150,7 +302,9 @@ function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: stri
               {ad.match_stats.map((s) => (
                 <tr key={s.side}>
                   <td>{s.side}</td>
-                  <td>{s.shots_on_goal ?? "—"}/{s.shots_total ?? "—"}</td>
+                  <td>
+                    {s.shots_on_goal ?? "—"}/{s.shots_total ?? "—"}
+                  </td>
                   <td>{s.corners ?? "—"}</td>
                   <td>{s.possession != null ? `${s.possession}%` : "—"}</td>
                   <td>{s.yellow_cards ?? "—"}</td>
@@ -171,8 +325,17 @@ function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: stri
                   {ad.team_form_home.map((f, i) => (
                     <tr key={i}>
                       <td>{f.match_date}</td>
-                      <td>{f.is_home ? "H" : "A"} vs {f.opponent_name}</td>
-                      <td><span className={`badge ${f.result === "W" ? "ok" : f.result === "L" ? "warn" : ""}`}>{f.result}</span> {f.goals_scored}-{f.goals_conceded}</td>
+                      <td>
+                        {f.is_home ? "H" : "A"} vs {f.opponent_name}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${f.result === "W" ? "ok" : f.result === "L" ? "warn" : ""}`}
+                        >
+                          {f.result}
+                        </span>{" "}
+                        {f.goals_scored}-{f.goals_conceded}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -187,8 +350,17 @@ function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: stri
                   {ad.team_form_away.map((f, i) => (
                     <tr key={i}>
                       <td>{f.match_date}</td>
-                      <td>{f.is_home ? "H" : "A"} vs {f.opponent_name}</td>
-                      <td><span className={`badge ${f.result === "W" ? "ok" : f.result === "L" ? "warn" : ""}`}>{f.result}</span> {f.goals_scored}-{f.goals_conceded}</td>
+                      <td>
+                        {f.is_home ? "H" : "A"} vs {f.opponent_name}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${f.result === "W" ? "ok" : f.result === "L" ? "warn" : ""}`}
+                        >
+                          {f.result}
+                        </span>{" "}
+                        {f.goals_scored}-{f.goals_conceded}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -196,15 +368,6 @@ function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: stri
             </div>
           )}
         </div>
-      )}
-
-      <OddsTable rows={oddsToa} title="The Odds API" />
-      <OddsTable rows={oddsAf} title="API-Football" />
-      {hasAfLink && oddsAf.length === 0 && oddsToa.length > 0 && (
-        <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
-          API-Football: fixture связан, но prematch odds пока пусто (лимит тарифа или линия ещё не открыта).
-          Проверьте лог после Fetch odds.
-        </p>
       )}
 
       {ad.odds_history.length > 0 && (
@@ -223,11 +386,15 @@ function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: stri
             <tbody>
               {ad.odds_history.map((h, i) => (
                 <tr key={i} className={h.is_significant ? "row-significant" : ""}>
-                  <td>{h.bookmaker} / {h.market}</td>
+                  <td>
+                    {h.bookmaker} / {h.market}
+                  </td>
                   <td>{h.outcome}</td>
                   <td>{h.odds_prev ?? "—"}</td>
                   <td>{h.odds_curr}</td>
-                  <td>{h.direction} {h.movement_pct}%</td>
+                  <td>
+                    {h.direction} {h.movement_pct}%
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -250,10 +417,11 @@ function ApiDataSection({ api: ad, home, away }: { api: MatchApiData; home: stri
       )}
 
       {ad.external_ids.length === 0 &&
-        ad.odds.length === 0 &&
+        (ad.odds_total ?? 0) === 0 &&
         ad.match_stats.length === 0 && (
           <p style={{ color: "var(--muted)" }}>
-            Нет данных API. Запустите <Link to="/api">link / sync</Link> в разделе Sport API.
+            Нет данных API. Запустите{" "}
+            <Link to="/api">link / sync</Link> в разделе Sport API.
           </p>
         )}
     </section>
@@ -282,6 +450,11 @@ export default function MatchDetailPage() {
   if (!data) return null;
 
   const m = data.match;
+  const showApi =
+    data.api_data ||
+    m.odds_count > 0 ||
+    m.has_api_football ||
+    m.has_odds_api;
 
   return (
     <>
@@ -290,7 +463,12 @@ export default function MatchDetailPage() {
       </p>
       <h2>
         {m.team_home} — {m.team_away}
-        {m.score && <span style={{ color: "var(--muted)", fontWeight: 400 }}> {m.score}</span>}
+        {m.score && (
+          <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+            {" "}
+            {m.score}
+          </span>
+        )}
       </h2>
       <div className="match-meta panel">
         <span>ID {m.id}</span>
@@ -311,14 +489,21 @@ export default function MatchDetailPage() {
         </span>
         {m.has_api_football && <span className="badge ok">AF</span>}
         {m.has_odds_api && <span className="badge ok">Odds</span>}
-        {m.odds_count ? <span>{m.odds_count} odds</span> : null}
+        {m.odds_count ? (
+          <span>{m.odds_count.toLocaleString()} odds</span>
+        ) : null}
         {m.match_key && (
           <code style={{ fontSize: "0.75rem" }}>{m.match_key}</code>
         )}
       </div>
 
-      {data.api_data && (
-        <ApiDataSection api={data.api_data} home={m.team_home} away={m.team_away} />
+      {showApi && data.api_data && (
+        <ApiDataSection
+          matchId={m.id}
+          api={data.api_data}
+          home={m.team_home}
+          away={m.team_away}
+        />
       )}
 
       {data.ai_summary && (

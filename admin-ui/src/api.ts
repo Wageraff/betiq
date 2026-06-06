@@ -136,6 +136,20 @@ export type TeamFormRow = {
   competition_name?: string | null;
 };
 
+export type OddsMarketSummary = {
+  market: string;
+  count: number;
+  provider: string;
+};
+
+export type MatchOddsList = {
+  match_id: number;
+  market?: string | null;
+  total: number;
+  market_count: number;
+  items: MatchOddsRow[];
+};
+
 export type MatchApiData = {
   status?: string | null;
   venue_name?: string | null;
@@ -148,6 +162,9 @@ export type MatchApiData = {
   odds_fetched_at?: string | null;
   external_ids: MatchExternalId[];
   match_stats: MatchStatsRow[];
+  odds_total: number;
+  odds_markets: OddsMarketSummary[];
+  odds_market?: string | null;
   odds: MatchOddsRow[];
   odds_history: OddsHistoryRow[];
   lineups: { side?: string; formation?: string; coach_name?: string; players_count: number }[];

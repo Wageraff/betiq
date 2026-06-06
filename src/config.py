@@ -145,6 +145,9 @@ class Settings(BaseSettings):
     odds_skip_finished_hours: int = int(
         _api_sync.get("odds_skip_finished_hours", fallback=3)
     )
+    admin_match_odds_limit: int = int(
+        _api_sync.get("admin_match_odds_limit", fallback=500)
+    )
 
 
 settings = Settings()

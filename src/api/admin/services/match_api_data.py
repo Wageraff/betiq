@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.odds import odds_provider_for_market
+from src.config import settings
 from src.db.models import (
     Match,
     MatchExternalId,
@@ -64,7 +65,93 @@ async def load_list_meta(
     return out
 
 
-async def load_match_api_bundle(session: AsyncSession, match: Match) -> dict:
+_PRIORITY_ODDS_MARKETS = (
+    "h2h",
+    "Match Winner",
+    "spreads",
+    "totals",
+    "btts",
+    "draw_no_bet",
+    "Goals Over/Under",
+    "Both Teams Score",
+    "Asian Handicap",
+)
+
+
+async def load_odds_market_summary(
+    session: AsyncSession, match_id: int
+) -> tuple[int, list[dict]]:
+    total = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(MatchOdds)
+            .where(MatchOdds.match_id == match_id)
+        )
+        or 0
+    )
+    rows = (
+        await session.execute(
+            select(MatchOdds.market, func.count())
+            .where(MatchOdds.match_id == match_id)
+            .group_by(MatchOdds.market)
+            .order_by(func.count().desc())
+        )
+    ).all()
+    markets = [
+        {
+            "market": market,
+            "count": int(count),
+            "provider": odds_provider_for_market(market),
+        }
+        for market, count in rows
+    ]
+    return total, markets
+
+
+def default_odds_market(markets: list[dict]) -> str | None:
+    if not markets:
+        return None
+    names = {m["market"] for m in markets}
+    for preferred in _PRIORITY_ODDS_MARKETS:
+        if preferred in names:
+            return preferred
+    return markets[0]["market"]
+
+
+async def load_match_odds_rows(
+    session: AsyncSession,
+    match_id: int,
+    *,
+    market: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict]:
+    cap = limit if limit is not None else settings.admin_match_odds_limit
+    stmt = select(MatchOdds).where(MatchOdds.match_id == match_id)
+    if market:
+        stmt = stmt.where(MatchOdds.market == market)
+    stmt = stmt.order_by(
+        MatchOdds.bookmaker, MatchOdds.outcome
+    ).offset(offset).limit(cap)
+    rows = (await session.scalars(stmt)).all()
+    return [
+        {
+            "provider": odds_provider_for_market(o.market),
+            "bookmaker": o.bookmaker,
+            "market": o.market,
+            "outcome": o.outcome,
+            "odds": o.odds,
+            "point": o.point,
+            "is_live": o.is_live,
+            "recorded_at": o.recorded_at,
+        }
+        for o in rows
+    ]
+
+
+async def load_match_api_bundle(
+    session: AsyncSession, match: Match, *, odds_market: str | None = None
+) -> dict:
     external_ids = [
         {
             "provider": e.provider,
@@ -92,27 +179,13 @@ async def load_match_api_bundle(session: AsyncSession, match: Match) -> dict:
         for s in sorted(match.stats, key=lambda x: x.side)
     ]
 
-    odds = (
-        await session.scalars(
-            select(MatchOdds)
-            .where(MatchOdds.match_id == match.id)
-            .order_by(MatchOdds.market, MatchOdds.bookmaker, MatchOdds.outcome)
-            .limit(200)
-        )
-    ).all()
-    odds_rows = [
-        {
-            "provider": odds_provider_for_market(o.market),
-            "bookmaker": o.bookmaker,
-            "market": o.market,
-            "outcome": o.outcome,
-            "odds": o.odds,
-            "point": o.point,
-            "is_live": o.is_live,
-            "recorded_at": o.recorded_at,
-        }
-        for o in odds
-    ]
+    odds_total, odds_markets = await load_odds_market_summary(session, match.id)
+    active_market = odds_market or default_odds_market(odds_markets)
+    odds_rows = (
+        await load_match_odds_rows(session, match.id, market=active_market)
+        if active_market
+        else []
+    )
 
     history = (
         await session.scalars(
@@ -175,6 +248,9 @@ async def load_match_api_bundle(session: AsyncSession, match: Match) -> dict:
         "odds_fetched_at": match.odds_fetched_at,
         "external_ids": external_ids,
         "match_stats": stats,
+        "odds_total": odds_total,
+        "odds_markets": odds_markets,
+        "odds_market": active_market,
         "odds": odds_rows,
         "odds_history": history_rows,
         "lineups": lineups,

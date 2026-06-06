@@ -15,10 +15,16 @@ from src.api.admin.schemas import (
     AdminMatchApiData,
     AdminMatchBrief,
     AdminMatchDetail,
+    AdminMatchOddsList,
     AdminMatchesList,
     AdminPredictionOut,
 )
-from src.api.admin.services.match_api_data import load_list_meta, load_match_api_bundle
+from src.api.admin.services.match_api_data import (
+    load_list_meta,
+    load_match_api_bundle,
+    load_match_odds_rows,
+    load_odds_market_summary,
+)
 from src.api.deps import get_db
 from src.db.models import Match, MatchExternalId, Prediction
 
@@ -123,9 +129,43 @@ async def list_matches(
     )
 
 
+@router.get("/{match_id}/odds", response_model=AdminMatchOddsList)
+async def get_match_odds(
+    match_id: int,
+    market: Optional[str] = Query(None, description="Фильтр по рынку (h2h, Match Winner, …)"),
+    limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    exists = await db.scalar(select(Match.id).where(Match.id == match_id))
+    if not exists:
+        raise HTTPException(404, "Match not found")
+
+    total, markets = await load_odds_market_summary(db, match_id)
+    market_count = 0
+    if market:
+        for m in markets:
+            if m["market"] == market:
+                market_count = int(m["count"])
+                break
+
+    items = await load_match_odds_rows(
+        db, match_id, market=market, limit=limit, offset=offset
+    )
+    return AdminMatchOddsList(
+        match_id=match_id,
+        market=market,
+        total=total,
+        market_count=market_count or total,
+        items=items,
+    )
+
+
 @router.get("/{match_id}", response_model=AdminMatchDetail)
 async def get_match(
     match_id: int,
+    odds_market: Optional[str] = Query(None, description="Рынок odds для первой загрузки"),
     db: AsyncSession = Depends(get_db),
     _: None = Depends(require_admin),
 ):
@@ -168,7 +208,7 @@ async def get_match(
         )
 
     meta_map = await load_list_meta(db, [match.id])
-    bundle = await load_match_api_bundle(db, match)
+    bundle = await load_match_api_bundle(db, match, odds_market=odds_market)
 
     return AdminMatchDetail(
         match=_brief(match, meta_map.get(match.id)),

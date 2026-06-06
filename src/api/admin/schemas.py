@@ -130,6 +130,20 @@ class AdminMatchStatsOut(BaseModel):
     fetched_at: Optional[datetime] = None
 
 
+class AdminOddsMarketSummaryOut(BaseModel):
+    market: str
+    count: int
+    provider: str
+
+
+class AdminMatchOddsList(BaseModel):
+    match_id: int
+    market: Optional[str] = None
+    total: int = 0
+    market_count: int = 0
+    items: list["AdminMatchOddsOut"] = Field(default_factory=list)
+
+
 class AdminMatchOddsOut(BaseModel):
     provider: str = "the_odds_api"
     bookmaker: str
@@ -183,6 +197,9 @@ class AdminMatchApiData(BaseModel):
     odds_fetched_at: Optional[datetime] = None
     external_ids: list[AdminExternalIdOut] = Field(default_factory=list)
     match_stats: list[AdminMatchStatsOut] = Field(default_factory=list)
+    odds_total: int = 0
+    odds_markets: list[AdminOddsMarketSummaryOut] = Field(default_factory=list)
+    odds_market: Optional[str] = None
     odds: list[AdminMatchOddsOut] = Field(default_factory=list)
     odds_history: list[AdminOddsHistoryOut] = Field(default_factory=list)
     lineups: list[AdminLineupOut] = Field(default_factory=list)
