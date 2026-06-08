@@ -253,6 +253,30 @@ class AdminAiUpdate(BaseModel):
     ai_top_pick: Optional[str] = None
 
 
+class AdminAiDayUsageOut(BaseModel):
+    date: str
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    official_cost_usd: Optional[float] = None
+
+
+class AdminAiUsageOut(BaseModel):
+    configured: bool
+    admin_api_configured: bool
+    model: str
+    daily_budget_usd: Optional[float] = None
+    max_summaries_per_day: Optional[int] = None
+    pricing_note: str = ""
+    admin_error: Optional[str] = None
+    today: AdminAiDayUsageOut
+    yesterday: AdminAiDayUsageOut
+    remaining_budget_usd: Optional[float] = None
+    timezone: str = "UTC"
+    checked_at: datetime
+
+
 class SourceStatsOut(BaseModel):
     """Агрегаты scrape_logs за source_stats_days из config.ini."""
 

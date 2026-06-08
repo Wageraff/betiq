@@ -386,6 +386,30 @@ export type Source = {
   stats?: SourceStats | null;
 };
 
+export type AiDayUsage = {
+  date: string;
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_usd: number;
+  official_cost_usd?: number | null;
+};
+
+export type AiUsage = {
+  configured: boolean;
+  admin_api_configured: boolean;
+  model: string;
+  daily_budget_usd?: number | null;
+  max_summaries_per_day?: number | null;
+  pricing_note: string;
+  admin_error?: string | null;
+  today: AiDayUsage;
+  yesterday: AiDayUsage;
+  remaining_budget_usd?: number | null;
+  timezone: string;
+  checked_at: string;
+};
+
 export type Settings = {
   config_sections: { name: string; values: Record<string, string> }[];
   prompt_template_path: string;

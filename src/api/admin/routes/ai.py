@@ -9,11 +9,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.prompt_template import load_prompt_template, resolve_prompt_path
 from src.api.admin.deps import require_admin
-from src.api.admin.schemas import AdminAiMatchBrief, AdminAiUpdate
+from src.api.admin.schemas import AdminAiMatchBrief, AdminAiUpdate, AdminAiUsageOut
+from src.ai.usage_stats import build_ai_usage_report
 from src.api.deps import get_db
 from src.db.models import Match
 
 router = APIRouter(prefix="/ai", tags=["admin-ai"])
+
+
+@router.get("/usage", response_model=AdminAiUsageOut)
+async def get_ai_usage(
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    data = await build_ai_usage_report(db)
+    return AdminAiUsageOut(**data)
 
 
 @router.get("/matches", response_model=list[AdminAiMatchBrief])

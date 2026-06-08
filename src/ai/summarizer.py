@@ -57,7 +57,7 @@ def _parse_json_response(text: str) -> dict[str, Any]:
     return data
 
 
-async def _call_claude(prompt: str) -> dict[str, Any]:
+async def _call_claude(prompt: str) -> tuple[dict[str, Any], int, int]:
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
 
@@ -69,7 +69,10 @@ async def _call_claude(prompt: str) -> dict[str, Any]:
         messages=[{"role": "user", "content": prompt}],
     )
     text = "".join(block.text for block in message.content if block.type == "text")
-    return _parse_json_response(text)
+    usage = getattr(message, "usage", None)
+    inp = int(getattr(usage, "input_tokens", 0) or 0)
+    out = int(getattr(usage, "output_tokens", 0) or 0)
+    return _parse_json_response(text), inp, out
 
 
 async def _load_match(session: AsyncSession, match_id: int) -> Optional[Match]:
@@ -105,17 +108,26 @@ async def generate_for_match(
 
     prompt = build_match_summary_prompt(match, predictions)
     try:
-        result = await _call_claude(prompt)
+        result, input_tokens, output_tokens = await _call_claude(prompt)
     except Exception as e:
         log.error("AI failed for match_id=%s: %s", match_id, e)
         await alert_ai_failed(match_id, str(e))
         raise
+
+    from src.ai.usage_log import record_ai_usage
 
     match.ai_summary = result["summary"]
     match.ai_top_pick = result["top_pick"]
     match.ai_confidence = result["confidence"]
     match.ai_generated_at = datetime.utcnow()
     match.ai_model = settings.anthropic_model
+    await record_ai_usage(
+        session,
+        match_id=match.id,
+        model=settings.anthropic_model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
     await session.commit()
     log.info("AI summary generated for match %s (%s)", match_id, match.slug)
     return True

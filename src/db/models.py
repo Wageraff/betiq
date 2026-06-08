@@ -413,6 +413,26 @@ class OddsHistory(Base):
     )
 
 
+class AiUsageLog(Base):
+    __tablename__ = "ai_usage_log"
+    __table_args__ = (
+        Index("idx_ai_usage_log_created_at", "created_at"),
+        Index("idx_ai_usage_log_match_id", "match_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("matches.id", ondelete="SET NULL")
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="summary")
+    model: Mapped[str] = mapped_column(String(80), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class AiChatCache(Base):
     __tablename__ = "ai_chat_cache"
     __table_args__ = (

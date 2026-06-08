@@ -49,11 +49,16 @@ class Settings(BaseSettings):
     )
 
     anthropic_api_key: str = ""
+    anthropic_admin_api_key: str = ""
     # Claude API model ID (см. https://docs.anthropic.com — claude-sonnet-4-6)
     anthropic_model: str = _ai.get("model", fallback="claude-sonnet-4-6")
     # Шаблон промпта: {{team_home}}, {{predictions_block}}, … — см. prompts/README.md
     ai_prompt_template: str = _ai.get("prompt_template", fallback="prompts/ai_match_summary.txt")
     ai_analysis_max_chars: int = int(_ai.get("analysis_max_chars", fallback=500))
+    ai_daily_budget_usd: float = float(_ai.get("daily_budget_usd", fallback=0))
+    ai_max_summaries_per_day: int = int(_ai.get("max_summaries_per_day", fallback=0))
+    ai_input_price_per_mtok: float = float(_ai.get("input_price_per_mtok", fallback=3.0))
+    ai_output_price_per_mtok: float = float(_ai.get("output_price_per_mtok", fallback=15.0))
     telegram_bot_token: str = ""
     telegram_admin_chat_id: str = ""
     admin_api_key: str = ""
