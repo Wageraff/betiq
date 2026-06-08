@@ -71,6 +71,13 @@ async def load_list_meta(
             )
         ).all()
     )
+    api_pred_ids = set(
+        await session.scalars(
+            select(MatchApiPrediction.match_id).where(
+                MatchApiPrediction.match_id.in_(match_ids)
+            )
+        )
+    )
 
     out: dict[int, dict[str, object]] = {}
     for mid in match_ids:
@@ -80,6 +87,7 @@ async def load_list_meta(
             "has_odds_api": "the_odds_api" in providers,
             "odds_count": int(odds_counts.get(mid, 0)),
             "has_match_stats": int(stats_counts.get(mid, 0)) > 0,
+            "has_api_prediction": mid in api_pred_ids,
         }
     return out
 

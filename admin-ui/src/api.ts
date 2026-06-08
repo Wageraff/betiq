@@ -80,6 +80,7 @@ export type MatchBrief = {
   has_odds_api?: boolean;
   odds_count?: number;
   has_match_stats?: boolean;
+  has_api_prediction?: boolean;
 };
 
 export type MatchExternalId = {
@@ -184,6 +185,7 @@ export type ApiCoverageMatch = {
   has_the_odds_api: boolean;
   odds_count: number;
   odds_fetched_at?: string | null;
+  has_api_prediction?: boolean | null;
   sport_keys: string[];
 };
 
@@ -222,7 +224,49 @@ export type ApiSyncCoverage = {
     queue_count?: number;
     matches?: ApiCoverageMatch[];
   };
+  api_football_predictions?: {
+    with_odds_sync?: boolean;
+    stored_count?: number;
+    pending_count?: number;
+    batch_size?: number;
+    matches?: ApiCoverageMatch[];
+  };
   odds_in_db: { api_football?: number; the_odds_api?: number };
+};
+
+export type ApiSyncTheOddsConfig = {
+  odds_markets: string;
+  odds_event_markets: string;
+  odds_event_batch_size: number;
+};
+
+export type ApiSyncFootballConfig = {
+  odds_enabled: boolean;
+  odds_days_ahead: number;
+  odds_batch_size: number;
+  odds_markets: string;
+};
+
+export type ApiSyncConfig = {
+  config_path: string;
+  enabled: boolean;
+  link_batch_size: number;
+  fixture_refresh_limit: number;
+  odds_sync_mode: string;
+  odds_upcoming_days_ahead: number;
+  odds_skip_finished_hours: number;
+  odds_min_interval_minutes: number;
+  api_quota_alert_threshold: number;
+  admin_match_odds_limit: number;
+  the_odds_api: ApiSyncTheOddsConfig;
+  api_football: ApiSyncFootballConfig;
+};
+
+export type ApiSyncConfigSave = {
+  ok: boolean;
+  changed: string[];
+  config: ApiSyncConfig;
+  message: string;
 };
 
 export type ApiSyncStatus = {

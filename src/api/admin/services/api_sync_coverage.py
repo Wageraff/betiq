@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.constants import PROVIDER_API_FOOTBALL, PROVIDER_THE_ODDS_API
@@ -17,7 +17,8 @@ from src.api_clients.odds_scope import (
     upcoming_match_window,
 )
 from src.config import settings
-from src.db.models import Match
+from src.api_clients.stats_sync import matches_pending_api_predictions
+from src.db.models import Match, MatchApiPrediction
 
 
 def _markets_count(csv: str) -> int:
@@ -30,6 +31,13 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
     match_ids = [m.id for m in matches]
     providers = await match_external_providers(session, match_ids)
     odds_counts = await match_odds_counts(session, match_ids)
+    pred_ids = set(
+        await session.scalars(
+            select(MatchApiPrediction.match_id).where(
+                MatchApiPrediction.match_id.in_(match_ids)
+            )
+        )
+    ) if match_ids else set()
     by_key = await collect_odds_sport_keys(session, matches)
 
     bulk_markets = _markets_count(settings.the_odds_api_markets)
@@ -80,6 +88,13 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
         if PROVIDER_THE_ODDS_API in providers.get(m.id, set())
     ][: settings.the_odds_api_event_batch_size]
 
+    pred_pending = await matches_pending_api_predictions(
+        session, limit=settings.api_football_odds_batch_size
+    )
+    pred_have = int(
+        await session.scalar(select(func.count()).select_from(MatchApiPrediction)) or 0
+    )
+
     af_queue_ids = await upcoming_af_odds_match_ids(session)
     af_matches = []
     if af_queue_ids:
@@ -96,6 +111,7 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
                         providers=providers.get(m.id, set()),
                         odds_count=odds_counts.get(m.id, 0),
                         sport_keys=await odds_sport_keys_for_match(session, m),
+                        has_api_prediction=m.id in pred_ids,
                     )
                 )
 
@@ -134,6 +150,22 @@ async def fetch_sync_coverage(session: AsyncSession) -> dict:
             "queue_count": len(af_queue_ids),
             "matches": af_matches,
         },
+        "api_football_predictions": {
+            "with_odds_sync": True,
+            "stored_count": pred_have,
+            "pending_count": len(pred_pending),
+            "batch_size": settings.api_football_odds_batch_size,
+            "matches": [
+                _match_brief(
+                    m,
+                    providers=providers.get(m.id, set()),
+                    odds_count=odds_counts.get(m.id, 0),
+                    sport_keys=[],
+                    has_api_prediction=False,
+                )
+                for m in pred_pending[:15]
+            ],
+        },
         "odds_in_db": {
             "api_football": counts.get("match_odds_api_football", 0),
             "the_odds_api": counts.get("match_odds_the_odds_api", 0),
@@ -147,6 +179,7 @@ def _match_brief(
     providers: set[str],
     odds_count: int,
     sport_keys: list[str],
+    has_api_prediction: bool | None = None,
 ) -> dict:
     return {
         "id": m.id,
@@ -160,5 +193,6 @@ def _match_brief(
         "has_the_odds_api": PROVIDER_THE_ODDS_API in providers,
         "odds_count": odds_count,
         "odds_fetched_at": m.odds_fetched_at,
+        "has_api_prediction": has_api_prediction,
         "sport_keys": sport_keys,
     }

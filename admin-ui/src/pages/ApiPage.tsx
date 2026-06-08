@@ -1,6 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { api, ApiCoverageMatch, ApiSyncStatus } from "../api";
+import {
+  api,
+  ApiCoverageMatch,
+  ApiSyncConfig,
+  ApiSyncStatus,
+} from "../api";
 
 const DATE_LOCALE = "en-US";
 
@@ -17,6 +22,9 @@ function MatchBadges({ m }: { m: ApiCoverageMatch }) {
     <span style={{ whiteSpace: "nowrap" }}>
       {m.has_api_football && <span className="badge ok" title="API-Football">AF</span>}
       {m.has_the_odds_api && <span className="badge ok" title="The Odds API">O</span>}
+      {m.has_api_prediction && (
+        <span className="badge ok" title="API-Football prediction">P</span>
+      )}
       {m.odds_count > 0 && <span className="badge">{m.odds_count}</span>}
       {!m.has_api_football && !m.has_the_odds_api && (
         <span className="badge tier-low" title="Нет привязки">—</span>
@@ -30,10 +38,12 @@ const SYNC_ACTIONS: {
   label: string;
   hint: string;
   dangerous?: boolean;
+  confirm?: string;
 }[] = [
   { id: "link", label: "Link matches", hint: "API-Football + Odds API" },
   { id: "leagues", label: "Sync leagues", hint: "competitions" },
-  { id: "odds", label: "Fetch odds", hint: "All sports (Odds API) + API-Football" },
+  { id: "odds", label: "Fetch odds", hint: "Odds API + API-Football odds + /predictions" },
+  { id: "predictions", label: "Fetch predictions", hint: "API-Football /predictions backfill" },
   { id: "form", label: "Team form", hint: "48h window" },
   { id: "lineups", label: "Lineups", hint: "< 2h to kickoff" },
   { id: "stats", label: "Post-match stats", hint: "FT only" },
@@ -41,10 +51,19 @@ const SYNC_ACTIONS: {
   { id: "cleanup", label: "Cleanup AI cache", hint: "expired rows" },
   { id: "cleanup_data", label: "Cleanup old data", hint: "odds history, finished odds" },
   {
+    id: "prune_odds",
+    label: "Prune odds",
+    hint: "Удалить строки вне разрешённых рынков (config)",
+    confirm:
+      "Удалить из БД коэффициенты с рынками, которых нет в текущих настройках?\n\nПолный reset не выполняется.",
+  },
+  {
     id: "reset_odds",
     label: "Reset odds & refetch",
     hint: "Удалить ВСЕ match_odds + history, загрузить заново",
     dangerous: true,
+    confirm:
+      "Удалить ВСЕ коэффициенты (match_odds + odds_history) и загрузить заново по текущему config.ini?\n\nЛинковка матчей (AF/O) не затрагивается.",
   },
 ];
 
@@ -61,19 +80,44 @@ function QuotaBar({ used, limit }: { used: number; limit: number }) {
   );
 }
 
+function ConfigField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="config-field">
+      <span className="config-label">{label}</span>
+      {children}
+      {hint && <span className="config-hint">{hint}</span>}
+    </label>
+  );
+}
+
 export default function ApiPage() {
   const [status, setStatus] = useState<ApiSyncStatus | null>(null);
+  const [config, setConfig] = useState<ApiSyncConfig | null>(null);
   const [error, setError] = useState("");
+  const [configMsg, setConfigMsg] = useState("");
   const [jobId, setJobId] = useState("");
   const [log, setLog] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const data = await api.get<ApiSyncStatus>("/api-sync/status");
+      const [data, cfg] = await Promise.all([
+        api.get<ApiSyncStatus>("/api-sync/status"),
+        api.get<ApiSyncConfig>("/api-sync/config"),
+      ]);
       setStatus(data);
+      setConfig(cfg);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -85,13 +129,13 @@ export default function ApiPage() {
     load();
   }, []);
 
-  const run = async (action: string, dangerous?: boolean) => {
-    if (dangerous) {
-      const ok = window.confirm(
-        "Удалить ВСЕ коэффициенты (match_odds + odds_history) и загрузить заново по текущему config.ini?\n\nЛинковка матчей (AF/O) не затрагивается."
-      );
-      if (!ok) return;
-    }
+  const run = async (action: string, dangerous?: boolean, confirm?: string) => {
+    const text =
+      confirm ||
+      (dangerous
+        ? "Подтвердите опасное действие."
+        : undefined);
+    if (text && !window.confirm(text)) return;
     setError("");
     setLog([]);
     try {
@@ -112,6 +156,51 @@ export default function ApiPage() {
     }
   };
 
+  const saveConfig = async () => {
+    if (!config) return;
+    setSavingConfig(true);
+    setConfigMsg("");
+    setError("");
+    try {
+      const res = await api.patch<{
+        changed: string[];
+        config: ApiSyncConfig;
+        message: string;
+      }>("/api-sync/config", {
+        enabled: config.enabled,
+        link_batch_size: config.link_batch_size,
+        fixture_refresh_limit: config.fixture_refresh_limit,
+        odds_sync_mode: config.odds_sync_mode,
+        odds_upcoming_days_ahead: config.odds_upcoming_days_ahead,
+        odds_skip_finished_hours: config.odds_skip_finished_hours,
+        odds_min_interval_minutes: config.odds_min_interval_minutes,
+        api_quota_alert_threshold: config.api_quota_alert_threshold,
+        admin_match_odds_limit: config.admin_match_odds_limit,
+        the_odds_api: config.the_odds_api,
+        api_football: config.api_football,
+      });
+      setConfig(res.config);
+      setConfigMsg(res.message);
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const setToa = (patch: Partial<ApiSyncConfig["the_odds_api"]>) => {
+    setConfig((c) =>
+      c ? { ...c, the_odds_api: { ...c.the_odds_api, ...patch } } : c
+    );
+  };
+
+  const setAf = (patch: Partial<ApiSyncConfig["api_football"]>) => {
+    setConfig((c) =>
+      c ? { ...c, api_football: { ...c.api_football, ...patch } } : c
+    );
+  };
+
   const counts = status?.db_counts;
   const cov = status?.coverage;
 
@@ -122,6 +211,7 @@ export default function ApiPage() {
         API-Football + The Odds API — синхронизация, лимиты, данные в БД
       </p>
       {error && <p className="error">{error}</p>}
+      {configMsg && <p style={{ color: "var(--ok)" }}>{configMsg}</p>}
       <div style={{ marginBottom: "1rem" }}>
         <button onClick={load} disabled={loading}>
           {loading ? "Обновление…" : "Обновить статус"}
@@ -132,6 +222,193 @@ export default function ApiPage() {
           </span>
         )}
       </div>
+
+      {config && (
+        <section className="panel">
+          <h3>Настройки сбора данных</h3>
+          <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+            Сохранение записывает в{" "}
+            <code>{config.config_path}</code> (секция <code>[api_sync]</code>).
+            Scheduler подхватит при следующем cron-запуске.
+          </p>
+
+          <div className="config-grid">
+            <div>
+              <h4>Общие</h4>
+              <ConfigField label="api_sync.enabled">
+                <select
+                  value={config.enabled ? "true" : "false"}
+                  onChange={(e) =>
+                    setConfig({ ...config, enabled: e.target.value === "true" })
+                  }
+                >
+                  <option value="true">включён</option>
+                  <option value="false">выключен</option>
+                </select>
+              </ConfigField>
+              <ConfigField label="odds_sync_mode" hint="db_matches — только лиги из матчей БД">
+                <select
+                  value={config.odds_sync_mode}
+                  onChange={(e) =>
+                    setConfig({ ...config, odds_sync_mode: e.target.value })
+                  }
+                >
+                  <option value="db_matches">db_matches</option>
+                  <option value="all_leagues">all_leagues</option>
+                </select>
+              </ConfigField>
+              <ConfigField label="odds_upcoming_days_ahead" hint="Окно предстоящих матчей (дней)">
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={config.odds_upcoming_days_ahead}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      odds_upcoming_days_ahead: parseInt(e.target.value, 10) || 7,
+                    })
+                  }
+                />
+              </ConfigField>
+              <ConfigField label="odds_min_interval_minutes" hint="Троттлинг bulk TOA по sport_key">
+                <input
+                  type="number"
+                  min={0}
+                  value={config.odds_min_interval_minutes}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      odds_min_interval_minutes: parseInt(e.target.value, 10) || 0,
+                    })
+                  }
+                />
+              </ConfigField>
+              <ConfigField label="link_batch_size">
+                <input
+                  type="number"
+                  min={1}
+                  value={config.link_batch_size}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      link_batch_size: parseInt(e.target.value, 10) || 20,
+                    })
+                  }
+                />
+              </ConfigField>
+            </div>
+
+            <div>
+              <h4>The Odds API</h4>
+              <ConfigField
+                label="odds_markets"
+                hint="Bulk /sports/{key}/odds — через запятую: h2h,spreads,totals"
+              >
+                <input
+                  type="text"
+                  value={config.the_odds_api.odds_markets}
+                  onChange={(e) => setToa({ odds_markets: e.target.value })}
+                />
+              </ConfigField>
+              <ConfigField
+                label="odds_event_markets"
+                hint="Per-event (кредит на матч): btts, draw_no_bet, …"
+              >
+                <input
+                  type="text"
+                  value={config.the_odds_api.odds_event_markets}
+                  onChange={(e) => setToa({ odds_event_markets: e.target.value })}
+                />
+              </ConfigField>
+              <ConfigField label="odds_event_batch_size">
+                <input
+                  type="number"
+                  min={1}
+                  value={config.the_odds_api.odds_event_batch_size}
+                  onChange={(e) =>
+                    setToa({
+                      odds_event_batch_size: parseInt(e.target.value, 10) || 40,
+                    })
+                  }
+                />
+              </ConfigField>
+            </div>
+
+            <div>
+              <h4>API-Football</h4>
+              <ConfigField label="api_football_odds_enabled">
+                <select
+                  value={config.api_football.odds_enabled ? "true" : "false"}
+                  onChange={(e) =>
+                    setAf({ odds_enabled: e.target.value === "true" })
+                  }
+                >
+                  <option value="true">да</option>
+                  <option value="false">нет</option>
+                </select>
+              </ConfigField>
+              <ConfigField
+                label="api_football_odds_markets"
+                hint="Пусто = из Odds API (Match Winner, Goals Over/Under, …)"
+              >
+                <input
+                  type="text"
+                  placeholder="Match Winner,Goals Over/Under,Both Teams Score"
+                  value={config.api_football.odds_markets}
+                  onChange={(e) => setAf({ odds_markets: e.target.value })}
+                />
+              </ConfigField>
+              <ConfigField label="api_football_odds_days_ahead">
+                <input
+                  type="number"
+                  min={1}
+                  value={config.api_football.odds_days_ahead}
+                  onChange={(e) =>
+                    setAf({
+                      odds_days_ahead: parseInt(e.target.value, 10) || 7,
+                    })
+                  }
+                />
+              </ConfigField>
+              <ConfigField label="api_football_odds_batch_size">
+                <input
+                  type="number"
+                  min={1}
+                  value={config.api_football.odds_batch_size}
+                  onChange={(e) =>
+                    setAf({
+                      odds_batch_size: parseInt(e.target.value, 10) || 50,
+                    })
+                  }
+                />
+              </ConfigField>
+              <ConfigField label="fixture_refresh_limit" hint="Обновление EN competition за link">
+                <input
+                  type="number"
+                  min={1}
+                  value={config.fixture_refresh_limit}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      fixture_refresh_limit: parseInt(e.target.value, 10) || 20,
+                    })
+                  }
+                />
+              </ConfigField>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={saveConfig}
+            disabled={savingConfig}
+            style={{ marginTop: "1rem" }}
+          >
+            {savingConfig ? "Сохранение…" : "Сохранить в config.ini"}
+          </button>
+        </section>
+      )}
 
       {status && (
         <div className="api-grid">
@@ -284,6 +561,32 @@ export default function ApiPage() {
               ) : (
                 <p style={{ color: "var(--muted)" }}>api_football_odds_enabled = false</p>
               )}
+              {cov.api_football_predictions && (
+                <>
+                  <h4 style={{ marginTop: "1rem" }}>API-Football /predictions</h4>
+                  <p style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
+                    С коэффициентами (Fetch odds) · в БД:{" "}
+                    {cov.api_football_predictions.stored_count ?? 0}
+                    {" · "}
+                    ожидают: {cov.api_football_predictions.pending_count ?? 0}
+                  </p>
+                  {(cov.api_football_predictions.matches ?? []).length === 0 ? (
+                    <p style={{ color: "var(--muted)" }}>Все в очереди уже с прогнозом</p>
+                  ) : (
+                    <table className="compact-table">
+                      <tbody>
+                        {(cov.api_football_predictions.matches ?? []).map((m) => (
+                          <tr key={m.id}>
+                            <td><MatchLinks m={m} /></td>
+                            <td>{m.competition ?? "—"}</td>
+                            <td><MatchBadges m={m} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )}
             </div>
           </div>
 
@@ -326,7 +629,9 @@ export default function ApiPage() {
                       ? "match_odds (API-Football)"
                       : k === "match_odds_the_odds_api"
                         ? "match_odds (The Odds API)"
-                        : k}
+                        : k === "match_api_predictions"
+                          ? "API-Football predictions"
+                          : k}
                   </td>
                   <td>{v.toLocaleString()}</td>
                 </tr>
@@ -343,7 +648,7 @@ export default function ApiPage() {
             <button
               key={a.id}
               className={a.dangerous ? "warn-btn" : "secondary"}
-              onClick={() => run(a.id, a.dangerous)}
+              onClick={() => run(a.id, a.dangerous, a.confirm)}
               title={a.hint}
             >
               {a.label}

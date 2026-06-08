@@ -10,6 +10,7 @@ from src.api_clients.the_odds_api import TheOddsApiClient
 from src.config import settings
 from src.db.models import (
     Competition,
+    MatchApiPrediction,
     MatchExternalId,
     MatchLineup,
     MatchOdds,
@@ -95,4 +96,5 @@ async def fetch_db_counts(session: AsyncSession) -> dict[str, int]:
         "match_stats": await _count(MatchStats),
         "team_form": await _count(TeamForm),
         "match_lineups": await _count(MatchLineup),
+        "match_api_predictions": await _count(MatchApiPrediction),
     }

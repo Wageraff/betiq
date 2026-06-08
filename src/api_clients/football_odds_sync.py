@@ -11,6 +11,7 @@ from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_match_external_id
 from src.api_clients.odds import ingest_api_football_odds
 from src.api_clients.odds_scope import upcoming_football_matches
+from src.api_clients.stats_sync import fetch_api_prediction
 from src.config import settings
 from src.db.models import Match, MatchExternalId
 
@@ -41,6 +42,7 @@ async def sync_api_football_odds(
     total = 0
     checked = 0
     empty = 0
+    predictions = 0
     for match in matches:
         fixture_id = await get_match_external_id(
             session, match.id, PROVIDER_API_FOOTBALL
@@ -57,17 +59,20 @@ async def sync_api_football_odds(
                     fixture_id,
                     match.id,
                 )
-                continue
-            for row in rows:
-                total += await ingest_api_football_odds(session, match, row)
+            else:
+                for row in rows:
+                    total += await ingest_api_football_odds(session, match, row)
+            if await fetch_api_prediction(session, match):
+                predictions += 1
         except Exception:
             log.exception("API-Football odds failed match_id=%s", match.id)
     await session.commit()
     log.info(
-        "API-Football odds sync: checked=%s empty=%s lines=%s window_days=%s",
+        "API-Football odds sync: checked=%s empty=%s lines=%s predictions=%s window_days=%s",
         checked,
         empty,
         total,
+        predictions,
         settings.api_football_odds_days_ahead,
     )
     return total

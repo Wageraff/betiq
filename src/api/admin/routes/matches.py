@@ -64,6 +64,7 @@ def _brief(m: Match, meta: dict | None = None) -> AdminMatchBrief:
         has_odds_api=bool(meta.get("has_odds_api")),
         odds_count=int(meta.get("odds_count", 0)),
         has_match_stats=bool(meta.get("has_match_stats")),
+        has_api_prediction=bool(meta.get("has_api_prediction")),
     )
 
 

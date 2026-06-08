@@ -9,16 +9,47 @@ from src.api.admin.schemas import (
     ActionResponse,
     ApiProviderQuotaOut,
     ApiSyncActionRequest,
+    ApiSyncConfigOut,
+    ApiSyncConfigSaveOut,
+    ApiSyncConfigUpdate,
     ApiSyncCoverageOut,
     ApiSyncStatusOut,
 )
 from src.api.admin.services import actions as job_actions
 from src.api.admin.services.api_sync_admin import fetch_db_counts, fetch_live_quotas
+from src.api.admin.services.api_sync_config import api_sync_config_out, save_api_sync_config
 from src.api.admin.services.api_sync_coverage import fetch_sync_coverage
 from src.api.deps import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api-sync", tags=["admin-api-sync"])
+
+
+@router.get("/config", response_model=ApiSyncConfigOut)
+async def api_sync_get_config(_: None = Depends(require_admin)):
+    return ApiSyncConfigOut(**api_sync_config_out())
+
+
+@router.patch("/config", response_model=ApiSyncConfigSaveOut)
+async def api_sync_patch_config(
+    body: ApiSyncConfigUpdate,
+    _: None = Depends(require_admin),
+):
+    try:
+        result = save_api_sync_config(body.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    changed = result["changed"]
+    msg = (
+        f"Записано в config.ini: {', '.join(changed)}"
+        if changed
+        else "Изменений нет"
+    )
+    return ApiSyncConfigSaveOut(
+        changed=changed,
+        config=ApiSyncConfigOut(**result["config"]),
+        message=msg,
+    )
 
 
 @router.get("/status", response_model=ApiSyncStatusOut)

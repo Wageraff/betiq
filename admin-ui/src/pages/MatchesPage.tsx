@@ -86,6 +86,7 @@ export default function MatchesPage() {
               <th>Date (UTC)</th>
               <th>Score</th>
               <th>API</th>
+              <th>AF pred</th>
               <th>Predictions</th>
               <th>AI</th>
             </tr>
@@ -142,6 +143,19 @@ export default function MatchesPage() {
                   )}
                   {m.has_match_stats && <span className="badge" title="Stats">S</span>}
                   {!m.has_api_football && !m.has_odds_api && !m.has_match_stats && "—"}
+                </td>
+                <td>
+                  {m.has_api_prediction ? (
+                    <span className="badge ok" title="API-Football /predictions">
+                      yes
+                    </span>
+                  ) : m.has_api_football ? (
+                    <span className="badge" title="Ожидает загрузки с odds">
+                      no
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td>{m.predictions_count}</td>
                 <td>

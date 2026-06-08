@@ -43,6 +43,8 @@ async def main_async(action: str) -> None:
         await api_jobs.job_reset_odds(refetch=False)
     elif action == "prune_odds":
         await api_jobs.job_prune_odds()
+    elif action == "predictions":
+        await api_jobs.job_fetch_api_predictions()
     else:
         raise SystemExit(f"Unknown action: {action}")
 
@@ -65,6 +67,7 @@ def main() -> None:
             "reset_odds",
             "reset_odds_only",
             "prune_odds",
+            "predictions",
         ],
     )
     args = parser.parse_args()

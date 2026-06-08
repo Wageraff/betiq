@@ -162,6 +162,57 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+
+def reload_from_config_ini() -> None:
+    """Перечитать config.ini и обновить поля settings из ini-секций."""
+    global _cfg, _api_sync, settings
+
+    _cfg = _read_config()
+    _api_sync = _cfg["api_sync"] if _cfg.has_section("api_sync") else {}
+
+    s = settings
+    s.api_sync_enabled = _api_sync.getboolean("enabled", fallback=False)
+    s.api_link_batch_size = int(_api_sync.get("link_batch_size", fallback=50))
+    s.the_odds_api_markets = _api_sync.get(
+        "odds_markets", fallback="h2h,spreads,totals"
+    )
+    s.the_odds_api_event_markets = _api_sync.get(
+        "odds_event_markets",
+        fallback="btts,draw_no_bet,alternate_spreads,alternate_totals",
+    )
+    s.the_odds_api_event_batch_size = int(
+        _api_sync.get("odds_event_batch_size", fallback=40)
+    )
+    s.api_football_odds_enabled = _api_sync.getboolean(
+        "api_football_odds_enabled", fallback=True
+    )
+    s.api_football_odds_days_ahead = int(
+        _api_sync.get("api_football_odds_days_ahead", fallback=365)
+    )
+    s.api_football_odds_batch_size = int(
+        _api_sync.get("api_football_odds_batch_size", fallback=50)
+    )
+    s.api_football_odds_markets = _api_sync.get("api_football_odds_markets", fallback="")
+    s.api_fixture_refresh_limit = int(
+        _api_sync.get("fixture_refresh_limit", fallback=80)
+    )
+    s.odds_sync_mode = _api_sync.get("odds_sync_mode", fallback="db_matches")
+    s.odds_upcoming_days_ahead = int(
+        _api_sync.get("odds_upcoming_days_ahead", fallback=365)
+    )
+    s.odds_skip_finished_hours = int(
+        _api_sync.get("odds_skip_finished_hours", fallback=3)
+    )
+    s.admin_match_odds_limit = int(
+        _api_sync.get("admin_match_odds_limit", fallback=500)
+    )
+    s.odds_min_interval_minutes = int(
+        _api_sync.get("odds_min_interval_minutes", fallback=30)
+    )
+    s.api_quota_alert_threshold = int(
+        _api_sync.get("api_quota_alert_threshold", fallback=100)
+    )
+
 source_tier_high = _parse_csv(
     _scraper.get("source_tier_high", fallback="vseprosport_ru,stavkiprognozy_ru")
 )

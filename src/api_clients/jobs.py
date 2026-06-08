@@ -23,14 +23,19 @@ from src.api_clients.stats_sync import (
 )
 from src.api_clients.ai_cache import cleanup_expired_cache
 from src.api_clients.api_football import ApiFootballClient
-from src.config import settings
+from src.config import reload_from_config_ini, settings
 from src.db.models import ApiQuotaSnapshot, Match, MatchOdds, OddsHistory, Team
 from src.db.session import async_session_factory
 
 log = logging.getLogger("api_jobs")
 
 
+def _refresh_api_config() -> None:
+    reload_from_config_ini()
+
+
 def api_sync_enabled() -> bool:
+    _refresh_api_config()
     return settings.api_sync_enabled and (
         bool(settings.api_football_key) or bool(settings.the_odds_api_key)
     )
@@ -177,11 +182,11 @@ async def job_fetch_h2h() -> None:
 
 
 async def job_fetch_api_predictions() -> None:
-    """Прогнозы API-Football (/predictions) для матчей в ближайшие 48ч — однократно."""
+    """Backfill прогнозов API-Football (/predictions) — та же очередь, что odds."""
     if not settings.api_football_key:
         return
     async with async_session_factory() as session:
-        n = await sync_prematch_api_predictions(session, hours=48)
+        n = await sync_prematch_api_predictions(session)
         log.info("job_fetch_api_predictions: %s", n)
 
 

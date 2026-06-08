@@ -81,6 +81,7 @@ class AdminMatchBrief(BaseModel):
     has_odds_api: bool = False
     odds_count: int = 0
     has_match_stats: bool = False
+    has_api_prediction: bool = False
 
 
 class AdminMatchesList(BaseModel):
@@ -334,6 +335,68 @@ class ApiSyncActionRequest(BaseModel):
     action: str
 
 
+class ApiSyncTheOddsConfigOut(BaseModel):
+    odds_markets: str = "h2h,spreads,totals"
+    odds_event_markets: str = "btts"
+    odds_event_batch_size: int = 40
+
+
+class ApiSyncFootballConfigOut(BaseModel):
+    odds_enabled: bool = True
+    odds_days_ahead: int = 7
+    odds_batch_size: int = 50
+    odds_markets: str = ""
+
+
+class ApiSyncConfigOut(BaseModel):
+    config_path: str
+    enabled: bool
+    link_batch_size: int = 20
+    fixture_refresh_limit: int = 20
+    odds_sync_mode: str = "db_matches"
+    odds_upcoming_days_ahead: int = 7
+    odds_skip_finished_hours: int = 3
+    odds_min_interval_minutes: int = 30
+    api_quota_alert_threshold: int = 100
+    admin_match_odds_limit: int = 500
+    the_odds_api: ApiSyncTheOddsConfigOut
+    api_football: ApiSyncFootballConfigOut
+
+
+class ApiSyncTheOddsConfigUpdate(BaseModel):
+    odds_markets: Optional[str] = None
+    odds_event_markets: Optional[str] = None
+    odds_event_batch_size: Optional[int] = None
+
+
+class ApiSyncFootballConfigUpdate(BaseModel):
+    odds_enabled: Optional[bool] = None
+    odds_days_ahead: Optional[int] = None
+    odds_batch_size: Optional[int] = None
+    odds_markets: Optional[str] = None
+
+
+class ApiSyncConfigUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    link_batch_size: Optional[int] = None
+    fixture_refresh_limit: Optional[int] = None
+    odds_sync_mode: Optional[str] = None
+    odds_upcoming_days_ahead: Optional[int] = None
+    odds_skip_finished_hours: Optional[int] = None
+    odds_min_interval_minutes: Optional[int] = None
+    api_quota_alert_threshold: Optional[int] = None
+    admin_match_odds_limit: Optional[int] = None
+    the_odds_api: Optional[ApiSyncTheOddsConfigUpdate] = None
+    api_football: Optional[ApiSyncFootballConfigUpdate] = None
+
+
+class ApiSyncConfigSaveOut(BaseModel):
+    ok: bool = True
+    changed: list[str] = Field(default_factory=list)
+    config: ApiSyncConfigOut
+    message: str = ""
+
+
 class ApiProviderQuotaOut(BaseModel):
     configured: bool
     requests_today: Optional[int] = None
@@ -356,6 +419,7 @@ class ApiSyncCoverageMatchOut(BaseModel):
     has_the_odds_api: bool = False
     odds_count: int = 0
     odds_fetched_at: Optional[datetime] = None
+    has_api_prediction: Optional[bool] = None
     sport_keys: list[str] = Field(default_factory=list)
 
 
@@ -374,6 +438,7 @@ class ApiSyncCoverageOut(BaseModel):
     window: dict[str, object] = Field(default_factory=dict)
     the_odds_api: dict[str, object] = Field(default_factory=dict)
     api_football_odds: dict[str, object] = Field(default_factory=dict)
+    api_football_predictions: dict[str, object] = Field(default_factory=dict)
     odds_in_db: dict[str, int] = Field(default_factory=dict)
 
 

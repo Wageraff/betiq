@@ -455,7 +455,7 @@ function ApiPredictionPanel({
           {fetchedAt
             ? "API ответил, но прогноз пустой."
             : hasAfLink
-              ? "Прогноз ещё не загружен — дождитесь job_fetch_api_predictions или Sport API → sync."
+              ? "Прогноз ещё не загружен — подтягивается вместе с Fetch odds (каждые 10 мин) или Sport API → Fetch odds / Predictions."
               : "Нет привязки API-Football (fixture_id)."}
         </p>
       ) : (

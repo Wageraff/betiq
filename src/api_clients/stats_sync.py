@@ -469,20 +469,34 @@ async def sync_prematch_h2h(session: AsyncSession, *, hours: int = 72) -> int:
 # API-Football Predictions (/predictions)
 # ---------------------------------------------------------------------------
 
-async def fetch_api_prediction(session: AsyncSession, match: Match) -> bool:
+async def fetch_api_prediction(
+    session: AsyncSession, match: Match, *, force: bool = False
+) -> bool:
     """Загрузить встроенный прогноз API-Football (вероятности, форма, совет)."""
-    if match.sport != "football" or match.api_prediction_fetched_at is not None:
+    if match.sport != "football":
         return False
     fixture_id = await get_match_external_id(session, match.id, PROVIDER_API_FOOTBALL)
     if not fixture_id:
         return False
+
+    existing = await session.scalar(
+        select(MatchApiPrediction).where(MatchApiPrediction.match_id == match.id)
+    )
+    if existing and not force:
+        return False
+
     client = ApiFootballClient()
     if not client.enabled:
         return False
 
     rows = await client.get_fixture_predictions(fixture_id)
     if not rows:
-        match.api_prediction_fetched_at = datetime.now(timezone.utc)
+        # Не ставим api_prediction_fetched_at — повторим при следующем odds-sync
+        log.info(
+            "API-Football prediction empty fixture=%s match_id=%s",
+            fixture_id,
+            match.id,
+        )
         return False
 
     data = rows[0]
@@ -492,26 +506,16 @@ async def fetch_api_prediction(session: AsyncSession, match: Match) -> bool:
     teams = data.get("teams") or {}
     home_team = teams.get("home") or {}
     away_team = teams.get("away") or {}
+    goals = pred.get("goals") if isinstance(pred.get("goals"), dict) else {}
 
-    def _pct(val: str | None) -> int | None:
-        if not val:
-            return None
-        try:
-            return int(str(val).replace("%", "").strip())
-        except ValueError:
-            return None
-
-    existing = await session.scalar(
-        select(MatchApiPrediction).where(MatchApiPrediction.match_id == match.id)
-    )
     payload = dict(
         winner_team=winner.get("name"),
         winner_comment=winner.get("comment"),
-        percent_home=_pct(percent.get("home")),
-        percent_draw=_pct(percent.get("draw")),
-        percent_away=_pct(percent.get("away")),
-        goals_home=str(pred.get("goals", {}).get("home") or "") or None,
-        goals_away=str(pred.get("goals", {}).get("away") or "") or None,
+        percent_home=_parse_pct(percent.get("home")),
+        percent_draw=_parse_pct(percent.get("draw")),
+        percent_away=_parse_pct(percent.get("away")),
+        goals_home=str(goals.get("home") or "") or None,
+        goals_away=str(goals.get("away") or "") or None,
         advice=pred.get("advice"),
         form_home=(home_team.get("league") or {}).get("form"),
         form_away=(away_team.get("league") or {}).get("form"),
@@ -528,19 +532,34 @@ async def fetch_api_prediction(session: AsyncSession, match: Match) -> bool:
     return True
 
 
-async def sync_prematch_api_predictions(session: AsyncSession, *, hours: int = 48) -> int:
-    """Загружать прогнозы API-Football для матчей в ближайшие N часов."""
-    until = datetime.now(timezone.utc) + timedelta(hours=hours)
-    now = datetime.now(timezone.utc)
+async def matches_pending_api_predictions(
+    session: AsyncSession, *, limit: int | None = None
+) -> list[Match]:
+    """Предстоящие AF-матчи без сохранённого /predictions (то же окно, что odds)."""
+    from src.api_clients.odds_scope import upcoming_football_matches
+
     linked = await _linked_football_match_ids(session)
-    matches = [
+    have_pred = set(
+        await session.scalars(select(MatchApiPrediction.match_id))
+    )
+    pending = [
         m
-        for m in await upcoming_matches(session, sports={"football"}, for_stats_sync=True)
-        if m.id in linked
-        and m.match_date
-        and now <= m.match_date <= until
-        and m.api_prediction_fetched_at is None
+        for m in await upcoming_football_matches(session, for_odds_sync=True)
+        if m.id in linked and m.id not in have_pred
     ]
+    if limit is not None:
+        return pending[:limit]
+    return pending
+
+
+async def sync_prematch_api_predictions(
+    session: AsyncSession, *, limit: int | None = None
+) -> int:
+    """Backfill прогнозов API-Football для очереди odds (без отдельного окна 48ч)."""
+    from src.config import settings
+
+    batch = limit if limit is not None else settings.api_football_odds_batch_size
+    matches = await matches_pending_api_predictions(session, limit=batch)
     n = 0
     for m in matches:
         if await fetch_api_prediction(session, m):
