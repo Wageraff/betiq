@@ -64,7 +64,7 @@ _MMA_COMPETITION_RE = re.compile(
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 
 _COMPETITION_CANONICAL_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"чм|world\s*cup|fifa\s*world", re.I), "World Cup"),
+    (re.compile(r"чемпионат\s*мира|чм[\s\-–—]?\d*|чм\b|world\s*cup|fifa\s*world", re.I), "World Cup"),
     (re.compile(r"champions\s*league|лч\b|liga\s*campionilor", re.I), "UEFA Champions League"),
     (re.compile(r"europa\s*league|ле\b|liga\s*europa", re.I), "UEFA Europa League"),
     (re.compile(r"\bnhl\b|нхл\b", re.I), "NHL"),
@@ -110,6 +110,18 @@ def canonical_competition_name(competition: Optional[str]) -> Optional[str]:
     if _CYRILLIC_RE.search(text):
         return text
     return text
+
+
+def competition_has_cyrillic(competition: Optional[str]) -> bool:
+    return bool(competition and _CYRILLIC_RE.search(competition))
+
+
+def competition_needs_canonicalization(competition: Optional[str]) -> bool:
+    """True если canonical_competition_name изменит строку."""
+    if not competition or not str(competition).strip():
+        return False
+    canonical = canonical_competition_name(competition)
+    return bool(canonical and canonical != competition.strip())
 
 
 def infer_sport_from_competition(competition: Optional[str]) -> Optional[str]:

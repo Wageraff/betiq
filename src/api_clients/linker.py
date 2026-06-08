@@ -252,31 +252,9 @@ async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> di
 
 
 async def canonicalize_cyrillic_competitions(
-    session: AsyncSession, *, limit: int = 100
+    session: AsyncSession, *, limit: int = 500
 ) -> int:
-    """ЧМ-2026 / НХЛ → World Cup / NHL для матчей без AF refresh."""
-    from sqlalchemy import select
+    """ЧМ-2026 / НХЛ → World Cup / NHL (фильтр в Python — PG regex не ловит кириллицу)."""
+    from src.db.repair_competitions import repair_competition_names
 
-    from src.scraper.utils.normalizer import infer_sport_from_competition
-
-    since = datetime.now(timezone.utc) - timedelta(days=3)
-    matches = (
-        await session.scalars(
-            select(Match).where(
-                Match.match_date.isnot(None),
-                Match.match_date >= since,
-                Match.competition.op("~")("[\\u0400-\\u04FF]"),
-            )
-        )
-    ).all()
-    updated = 0
-    for match in matches[:limit]:
-        new_name = canonical_competition_name(match.competition)
-        if not new_name or new_name == match.competition:
-            continue
-        match.competition = new_name
-        inferred = infer_sport_from_competition(new_name)
-        if inferred:
-            match.sport = inferred
-        updated += 1
-    return updated
+    return await repair_competition_names(session)

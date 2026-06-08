@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api_clients.api_football import ApiFootballClient
@@ -12,6 +12,7 @@ from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_match_external_id
 from src.config import settings
 from src.db.models import Competition, CompetitionExternalId, Match, MatchExternalId
+from src.scraper.utils.normalizer import competition_needs_canonicalization
 
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 
@@ -88,22 +89,23 @@ async def refresh_linked_football_fields(
     linked = select(MatchExternalId.match_id).where(
         MatchExternalId.provider == PROVIDER_API_FOOTBALL
     )
-    matches = (
+    candidates = (
         await session.scalars(
             select(Match).where(
                 Match.id.in_(linked),
                 Match.sport == "football",
                 Match.match_date.isnot(None),
                 Match.match_date >= since,
-                # Пропускаем матчи с актуальными EN-полями — только кириллица или нет venue
-                or_(
-                    Match.fields_refreshed_at.is_(None),
-                    Match.venue_name.is_(None),
-                    Match.competition.op("~")("[\\u0400-\\u04FF]"),
-                ),
             )
         )
     ).all()
+    matches = [
+        m
+        for m in candidates
+        if m.fields_refreshed_at is None
+        or m.venue_name is None
+        or competition_needs_canonicalization(m.competition)
+    ]
     matches.sort(
         key=lambda m: (
             0 if _competition_needs_api_refresh(m.competition) else 1,

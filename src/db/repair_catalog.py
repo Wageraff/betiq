@@ -12,6 +12,7 @@ from src.db.session import async_session_factory
 from src.db.team_dedupe import dedupe_teams, merge_team_into
 from src.db.teams import get_or_create_team
 from src.scraper.utils.match_key import _match_team_label
+from src.db.repair_competitions import repair_competition_names
 from src.scraper.utils.team_names import (
     canonical_key_from_names,
     canonical_team_display,
@@ -266,8 +267,10 @@ async def run_repair_catalog(*, dry_run: bool = False) -> dict[str, int]:
 
             if dry_run:
                 matches_merged = await dedupe_matches(session, dry_run=True)
+                comp_fixed = await repair_competition_names(session, all_matches=True)
                 return {
                     "match_labels_fixed": labels_fixed,
+                    "competitions_canonicalized": comp_fixed,
                     "teams_rebuilt": teams_rebuilt,
                     "teams_removed": teams_removed + teams_removed_2,
                     "matches_merged": matches_merged,
@@ -288,10 +291,13 @@ async def run_repair_catalog(*, dry_run: bool = False) -> dict[str, int]:
 
             labels_fixed_2 = await _fix_match_labels(session)
             matches_merged = await dedupe_matches(session, dry_run=False)
+            comp_fixed = await repair_competition_names(session, all_matches=True)
+            print(f"==> competition names canonicalized: {comp_fixed}")
             await session.commit()
 
             return {
                 "match_labels_fixed": labels_fixed + labels_fixed_2,
+                "competitions_canonicalized": comp_fixed,
                 "teams_rebuilt": teams_rebuilt + teams_rebuilt_2,
                 "teams_removed": teams_removed + teams_removed_2 + teams_removed_3,
                 "match_links_updated": relinked,

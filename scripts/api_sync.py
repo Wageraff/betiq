@@ -45,6 +45,14 @@ async def main_async(action: str) -> None:
         await api_jobs.job_prune_odds()
     elif action == "predictions":
         await api_jobs.job_fetch_api_predictions()
+    elif action == "repair_competitions":
+        from src.db.repair_competitions import repair_competition_names
+        from src.db.session import async_session_factory
+
+        async with async_session_factory() as session:
+            n = await repair_competition_names(session, all_matches=True)
+            await session.commit()
+        print(f"competitions canonicalized: {n}")
     else:
         raise SystemExit(f"Unknown action: {action}")
 
@@ -68,6 +76,7 @@ def main() -> None:
             "reset_odds_only",
             "prune_odds",
             "predictions",
+            "repair_competitions",
         ],
     )
     args = parser.parse_args()

@@ -11,6 +11,7 @@ from src.db.models import Match, MatchExternalId
 from src.db.teams import get_or_create_team
 from src.scraper.utils.normalizer import (
     canonical_competition_name,
+    competition_needs_canonicalization,
     infer_sport_from_competition,
 )
 from src.scraper.utils.match_key_build import build_match_key, build_slug
@@ -68,6 +69,13 @@ def _refresh_match_fields(
         reinferred = infer_sport_from_competition(match.competition)
         if reinferred:
             match.sport = reinferred
+    if match.competition and competition_needs_canonicalization(match.competition):
+        canonical = canonical_competition_name(match.competition)
+        if canonical and canonical != match.competition:
+            match.competition = canonical
+            reinferred = infer_sport_from_competition(canonical)
+            if reinferred:
+                match.sport = reinferred
     if data.get("match_date"):
         match.match_date = data["match_date"]
         day = _as_date(data["match_date"])
@@ -135,13 +143,15 @@ async def find_or_create_match(session: AsyncSession, data: dict) -> Match:
         await _link_teams(session, match, data)
         return match
 
-    sport = data.get("sport")
+    raw_comp = data.get("competition")
+    competition = canonical_competition_name(raw_comp) if raw_comp else None
+    sport = infer_sport_from_competition(competition) or data.get("sport")
     match = Match(
         match_key=key,
         team_home=_match_team_label(data["team_home"], sport),
         team_away=_match_team_label(data["team_away"], sport),
-        sport=data.get("sport"),
-        competition=data.get("competition"),
+        sport=sport,
+        competition=competition,
         match_date=match_dt,
         slug=build_slug(data["team_home"], data["team_away"], day),
     )
