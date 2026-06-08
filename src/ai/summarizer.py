@@ -15,11 +15,19 @@ from datetime import datetime
 from typing import Any, Optional
 
 import anthropic
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.ai.prompt_template import build_match_summary_prompt, resolve_prompt_path
+from src.ai.readiness import (
+    MatchAiContext,
+    is_match_ai_ready_async,
+    load_match_ai_contexts,
+    matches_ready_for_ai,
+    missing_ai_requirements,
+)
+from src.api_clients.odds_keys import odds_sport_keys_for_match
 from src.config import settings, setup_logging
 from src.scraper.utils.alerter import alert_ai_failed
 from src.db.models import Match, Prediction
@@ -28,18 +36,34 @@ from src.db.session import async_session_factory
 log = logging.getLogger("summarizer")
 
 
-def needs_ai(match: Match) -> bool:
+async def _readiness_context(
+    session: AsyncSession, match: Match
+) -> tuple[MatchAiContext, bool | None]:
+    ctx_map = await load_match_ai_contexts(session, [match.id])
+    ctx = ctx_map.get(match.id, MatchAiContext())
+    the_odds_mappable: bool | None = None
+    if settings.api_sync_enabled and (match.sport or "").strip().lower() != "football":
+        the_odds_mappable = bool(await odds_sport_keys_for_match(session, match))
+    return ctx, the_odds_mappable
+
+
+async def needs_ai(session: AsyncSession, match: Match) -> bool:
+    """Нужна ли автоматическая генерация (один раз, после сбора всех данных)."""
+    return await is_match_ai_ready_async(session, match)
+
+
+async def ai_status_label(session: AsyncSession, match: Match) -> str:
+    if match.ai_generated_at is not None or match.ai_summary:
+        return "ready"
+    ctx, the_odds_mappable = await _readiness_context(session, match)
+    missing = missing_ai_requirements(
+        match, ctx, the_odds_mappable=the_odds_mappable
+    )
+    if not missing:
+        return "ready_to_generate"
     if (match.predictions_count or 0) < 2:
-        return False
-    if match.ai_generated_at is None:
-        return True
-    updated = match.updated_at
-    generated = match.ai_generated_at
-    if updated is None:
-        return True
-    if generated is None:
-        return True
-    return updated > generated
+        return "awaiting_predictions"
+    return f"awaiting_data ({', '.join(missing)})"
 
 
 def _parse_json_response(text: str) -> dict[str, Any]:
@@ -97,9 +121,18 @@ async def generate_for_match(
         log.warning("Match %s not found", match_id)
         return False
 
-    if not force and not needs_ai(match):
-        log.debug("Match %s does not need AI update", match_id)
+    if match.ai_generated_at is not None and not force:
+        log.debug("Match %s already has AI summary", match_id)
         return False
+
+    if not force:
+        if not await is_match_ai_ready_async(session, match):
+            ctx, the_odds_mappable = await _readiness_context(session, match)
+            missing = missing_ai_requirements(
+                match, ctx, the_odds_mappable=the_odds_mappable
+            )
+            log.debug("Match %s not ready for AI: %s", match_id, missing)
+            return False
 
     predictions = [p for p in match.predictions if p.match_id == match.id]
     if len(predictions) < 2:
@@ -134,14 +167,7 @@ async def generate_for_match(
 
 
 async def _matches_needing_ai(session: AsyncSession) -> list[int]:
-    stmt = select(Match.id).where(Match.predictions_count >= 2)
-    stmt = stmt.where(
-        or_(
-            Match.ai_generated_at.is_(None),
-            Match.updated_at > Match.ai_generated_at,
-        )
-    )
-    return list((await session.scalars(stmt)).all())
+    return await matches_ready_for_ai(session)
 
 
 async def print_prompt_for_match(match_id: int) -> None:

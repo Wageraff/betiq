@@ -24,7 +24,11 @@ from telegram.ext import (
     filters,
 )
 
-from src.ai.summarizer import _matches_needing_ai, generate_for_match, needs_ai
+from src.ai.summarizer import (
+    _matches_needing_ai,
+    ai_status_label,
+    generate_for_match,
+)
 from src.bot.digest import send_morning_digest
 from src.bot.formatters import (
     build_dashboard_text,
@@ -328,9 +332,7 @@ async def cmd_match(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not match:
             await _reply_html(update, "Match not found.")
             return
-        ai_status = "ready" if match.ai_summary else "pending"
-        if needs_ai(match):
-            ai_status = "needs generation"
+        ai_status = await ai_status_label(session, match)
         text = (
             f"<b>{match.team_home} vs {match.team_away}</b>\n"
             f"id: {match.id} | slug: <code>{match.slug}</code>\n"
