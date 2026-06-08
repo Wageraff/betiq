@@ -469,6 +469,22 @@ async def sync_prematch_h2h(session: AsyncSession, *, hours: int = 72) -> int:
 # API-Football Predictions (/predictions)
 # ---------------------------------------------------------------------------
 
+_FORM_LAST_N = 10
+
+
+def _normalize_form(val: object | None) -> str | None:
+    """API отдаёт длинную строку W/D/L — храним последние N результатов."""
+    if val is None:
+        return None
+    text = str(val).strip().upper()
+    if not text:
+        return None
+    letters = "".join(c for c in text if c in "WDL")
+    if letters:
+        return letters[-_FORM_LAST_N:]
+    return text[:_FORM_LAST_N]
+
+
 async def fetch_api_prediction(
     session: AsyncSession, match: Match, *, force: bool = False
 ) -> bool:
@@ -517,8 +533,8 @@ async def fetch_api_prediction(
         goals_home=str(goals.get("home") or "") or None,
         goals_away=str(goals.get("away") or "") or None,
         advice=pred.get("advice"),
-        form_home=(home_team.get("league") or {}).get("form"),
-        form_away=(away_team.get("league") or {}).get("form"),
+        form_home=_normalize_form((home_team.get("league") or {}).get("form")),
+        form_away=_normalize_form((away_team.get("league") or {}).get("form")),
         raw_json=data,
     )
     if existing:

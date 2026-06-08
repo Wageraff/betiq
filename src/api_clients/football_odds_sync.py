@@ -51,19 +51,20 @@ async def sync_api_football_odds(
             continue
         checked += 1
         try:
-            rows = await client.get_fixture_odds(fixture_id)
-            if not rows:
-                empty += 1
-                log.info(
-                    "API-Football odds empty fixture=%s match_id=%s",
-                    fixture_id,
-                    match.id,
-                )
-            else:
-                for row in rows:
-                    total += await ingest_api_football_odds(session, match, row)
-            if await fetch_api_prediction(session, match):
-                predictions += 1
+            async with session.begin_nested():
+                rows = await client.get_fixture_odds(fixture_id)
+                if not rows:
+                    empty += 1
+                    log.info(
+                        "API-Football odds empty fixture=%s match_id=%s",
+                        fixture_id,
+                        match.id,
+                    )
+                else:
+                    for row in rows:
+                        total += await ingest_api_football_odds(session, match, row)
+                if await fetch_api_prediction(session, match):
+                    predictions += 1
         except Exception:
             log.exception("API-Football odds failed match_id=%s", match.id)
     await session.commit()

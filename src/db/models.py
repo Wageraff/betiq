@@ -589,8 +589,8 @@ class MatchApiPrediction(Base):
     goals_home: Mapped[Optional[str]] = mapped_column(String(20))
     goals_away: Mapped[Optional[str]] = mapped_column(String(20))
     advice: Mapped[Optional[str]] = mapped_column(Text)
-    form_home: Mapped[Optional[str]] = mapped_column(String(10))
-    form_away: Mapped[Optional[str]] = mapped_column(String(10))
+    form_home: Mapped[Optional[str]] = mapped_column(String(16))
+    form_away: Mapped[Optional[str]] = mapped_column(String(16))
     raw_json: Mapped[Optional[Any]] = mapped_column(JSONB)
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
