@@ -6,6 +6,7 @@ Usage:
   PYTHONPATH=. python scripts/api_sync.py leagues
   PYTHONPATH=. python scripts/api_sync.py odds
   PYTHONPATH=. python scripts/api_sync.py stats
+  PYTHONPATH=. python scripts/api_sync.py prune_odds
 """
 from __future__ import annotations
 
@@ -40,6 +41,8 @@ async def main_async(action: str) -> None:
         await api_jobs.job_reset_odds(refetch=True)
     elif action == "reset_odds_only":
         await api_jobs.job_reset_odds(refetch=False)
+    elif action == "prune_odds":
+        await api_jobs.job_prune_odds()
     else:
         raise SystemExit(f"Unknown action: {action}")
 
@@ -61,6 +64,7 @@ def main() -> None:
             "cleanup_data",
             "reset_odds",
             "reset_odds_only",
+            "prune_odds",
         ],
     )
     args = parser.parse_args()

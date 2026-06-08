@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,8 +21,10 @@ from src.api_clients.external_ids import (
 )
 from src.api_clients.fixture_fields import apply_fixture_fields
 from src.api_clients.matching import event_matches_teams
+from src.api_clients.odds_keys import ODDS_KEY_LABELS
 from src.api_clients.the_odds_api import TheOddsApiClient
 from src.db.models import Match
+from src.scraper.utils.normalizer import canonical_competition_name
 
 log = logging.getLogger("linker")
 
@@ -166,8 +168,32 @@ async def link_match_to_odds_api(
                     event["id"],
                     confidence=0.9,
                 )
+                await _apply_competition_from_odds_key(session, match)
                 return True
     return False
+
+
+async def _apply_competition_from_odds_key(
+    session: AsyncSession, match: Match
+) -> None:
+    """EN-название турнира из sport_key, если competition ещё с кириллицы."""
+    from src.api_clients.fixture_fields import _competition_needs_api_refresh
+
+    if not _competition_needs_api_refresh(match.competition):
+        return
+    sport_keys = await odds_sport_keys_for_match(session, match)
+    for key in sport_keys:
+        label = ODDS_KEY_LABELS.get(key)
+        if not label:
+            continue
+        canonical = canonical_competition_name(label) or label
+        match.competition = canonical
+        from src.scraper.utils.normalizer import infer_sport_from_competition
+
+        inferred = infer_sport_from_competition(canonical)
+        if inferred:
+            match.sport = inferred
+        break
 
 
 async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> dict[str, int]:
@@ -217,8 +243,40 @@ async def link_unlinked_matches(session: AsyncSession, *, limit: int = 50) -> di
 
     try:
         stats["refreshed"] = await refresh_linked_football_fields(session)
+        stats["canonicalized"] = await canonicalize_cyrillic_competitions(session)
         await session.commit()
     except Exception:
         log.exception("refresh_linked_football_fields failed")
 
     return stats
+
+
+async def canonicalize_cyrillic_competitions(
+    session: AsyncSession, *, limit: int = 100
+) -> int:
+    """ЧМ-2026 / НХЛ → World Cup / NHL для матчей без AF refresh."""
+    from sqlalchemy import select
+
+    from src.scraper.utils.normalizer import infer_sport_from_competition
+
+    since = datetime.now(timezone.utc) - timedelta(days=3)
+    matches = (
+        await session.scalars(
+            select(Match).where(
+                Match.match_date.isnot(None),
+                Match.match_date >= since,
+                Match.competition.op("~")("[\\u0400-\\u04FF]"),
+            )
+        )
+    ).all()
+    updated = 0
+    for match in matches[:limit]:
+        new_name = canonical_competition_name(match.competition)
+        if not new_name or new_name == match.competition:
+            continue
+        match.competition = new_name
+        inferred = infer_sport_from_competition(new_name)
+        if inferred:
+            match.sport = inferred
+        updated += 1
+    return updated

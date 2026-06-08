@@ -8,6 +8,13 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api_clients.odds_markets import (
+    allowed_api_football_markets,
+    allowed_the_odds_api_markets,
+    is_allowed_api_football_market,
+    is_allowed_the_odds_market,
+    market_overrides_for_match,
+)
 from src.db.models import Match, MatchOdds, OddsHistory
 
 log = logging.getLogger("odds_sync")
@@ -155,10 +162,14 @@ async def ingest_odds_api_event(
     """Разобрать ответ The Odds API для одного event."""
     count = 0
     sport = match.sport or "unknown"
+    override = await market_overrides_for_match(session, match)
+    allowed = allowed_the_odds_api_markets(override=override)
     for bookmaker in event.get("bookmakers") or []:
         bk = bookmaker.get("key") or bookmaker.get("title") or "unknown"
         for mkt in bookmaker.get("markets") or []:
             market = mkt.get("key") or "unknown"
+            if not is_allowed_the_odds_market(market, allowed):
+                continue
             for out in mkt.get("outcomes") or []:
                 name = out.get("name") or "?"
                 point = out.get("point")
@@ -186,10 +197,16 @@ async def ingest_api_football_odds(
     """Разобрать ответ API-Football GET /odds для одного fixture."""
     count = 0
     sport = match.sport or "football"
+    override = await market_overrides_for_match(session, match)
+    allowed = allowed_api_football_markets(override=override)
+    if not allowed:
+        return 0
     for bookmaker in odds_payload.get("bookmakers") or []:
         bk = (bookmaker.get("name") or str(bookmaker.get("id") or "unknown")).strip()
         for bet in bookmaker.get("bets") or []:
             market = (bet.get("name") or "unknown").strip()
+            if not is_allowed_api_football_market(market, allowed):
+                continue
             for val in bet.get("values") or []:
                 outcome = _odds_outcome_label(val.get("value"))
                 price = val.get("odd")

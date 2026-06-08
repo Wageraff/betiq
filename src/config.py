@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     api_football_odds_batch_size: int = int(
         _api_sync.get("api_football_odds_batch_size", fallback=50)
     )
+    api_football_odds_markets: str = _api_sync.get(
+        "api_football_odds_markets",
+        fallback="",
+    )
     api_fixture_refresh_limit: int = int(
         _api_sync.get("fixture_refresh_limit", fallback=80)
     )

@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.db.models import Match, MatchExternalId
 from src.db.teams import get_or_create_team
-from src.scraper.utils.normalizer import infer_sport_from_competition
+from src.scraper.utils.normalizer import (
+    canonical_competition_name,
+    infer_sport_from_competition,
+)
 from src.scraper.utils.match_key_build import build_match_key, build_slug
 from src.scraper.utils.team_names import (
     canonical_team_display,
@@ -60,7 +63,11 @@ def _refresh_match_fields(
     if inferred or data.get("sport"):
         match.sport = sport
     if data.get("competition") is not None and not preserve_competition:
-        match.competition = data["competition"] or match.competition
+        raw_comp = data["competition"] or match.competition
+        match.competition = canonical_competition_name(raw_comp) or raw_comp
+        reinferred = infer_sport_from_competition(match.competition)
+        if reinferred:
+            match.sport = reinferred
     if data.get("match_date"):
         match.match_date = data["match_date"]
         day = _as_date(data["match_date"])

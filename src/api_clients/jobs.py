@@ -11,7 +11,7 @@ from src.api_clients.constants import PROVIDER_API_FOOTBALL
 from src.api_clients.external_ids import get_team_external_id, sync_team_logo_from_api
 from src.api_clients.football_odds_sync import sync_api_football_odds
 from src.api_clients.linker import link_unlinked_matches
-from src.api_clients.odds_cleanup import clear_all_odds_data
+from src.api_clients.odds_cleanup import clear_all_odds_data, prune_disallowed_odds
 from src.api_clients.odds_sync import sync_all_odds
 from src.api_clients.stats_sync import (
     sync_post_match_stats,
@@ -131,6 +131,13 @@ async def job_reset_odds(*, refetch: bool = True) -> None:
     log.info("job_reset_odds: cleared %s", stats)
     if refetch:
         await job_fetch_odds(force=True)
+
+
+async def job_prune_odds() -> None:
+    """Удалить odds вне разрешённых рынков (без полного reset)."""
+    async with async_session_factory() as session:
+        stats = await prune_disallowed_odds(session)
+    log.info("job_prune_odds: %s", stats)
 
 
 async def job_fetch_odds_football() -> None:

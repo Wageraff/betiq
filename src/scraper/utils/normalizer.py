@@ -61,6 +61,22 @@ _MMA_COMPETITION_RE = re.compile(
     r"\b(ufc|bellator|pfl|one\s+championship|mma|bare\s+knuckle)\b", re.I
 )
 
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+
+_COMPETITION_CANONICAL_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"чм|world\s*cup|fifa\s*world", re.I), "World Cup"),
+    (re.compile(r"champions\s*league|лч\b|liga\s*campionilor", re.I), "UEFA Champions League"),
+    (re.compile(r"europa\s*league|ле\b|liga\s*europa", re.I), "UEFA Europa League"),
+    (re.compile(r"\bnhl\b|нхл\b", re.I), "NHL"),
+    (re.compile(r"\bnba\b", re.I), "NBA"),
+    (re.compile(r"рпл|rpl|premier\s*league.*russia", re.I), "Premier League"),
+    (re.compile(r"la\s*liga|испан", re.I), "La Liga"),
+    (re.compile(r"bundesliga|бундес", re.I), "Bundesliga"),
+    (re.compile(r"serie\s*a|серия\s*а", re.I), "Serie A"),
+    (re.compile(r"ligue\s*1", re.I), "Ligue 1"),
+    (re.compile(r"friendl|товарищ", re.I), "Friendlies"),
+]
+
 ALLOWED_BET_TYPES = frozenset({
     "1x2",
     "1X2",
@@ -83,12 +99,40 @@ def is_allowed_bet_type(bet_type: str | None) -> bool:
     return str(bet_type).lower().strip() in _ALLOWED_BET_TYPES_LOWER
 
 
+def canonical_competition_name(competition: Optional[str]) -> Optional[str]:
+    """Русские/смешанные названия турниров → EN (до AF-link)."""
+    if not competition or not str(competition).strip():
+        return competition
+    text = str(competition).strip()
+    for pattern, name in _COMPETITION_CANONICAL_RULES:
+        if pattern.search(text):
+            return name
+    if _CYRILLIC_RE.search(text):
+        return text
+    return text
+
+
 def infer_sport_from_competition(competition: Optional[str]) -> Optional[str]:
-    """UFC/MMA в названии турнира → mma, даже если URL/раздел источника — tennis."""
+    """Вид спорта по названию турнира (UFC → mma, ЧМ → football, …)."""
     if not competition:
         return None
     if _MMA_COMPETITION_RE.search(competition):
         return "mma"
+    if re.search(r"world\s*cup|чм|fifa\s*world", competition, re.I):
+        return "football"
+    if re.search(r"\bnhl\b|нхл\b|кхл\b", competition, re.I):
+        return "hockey"
+    if re.search(r"\bnba\b|wnba\b|euroleague", competition, re.I):
+        return "basketball"
+    if re.search(
+        r"champions\s*league|europa\s*league|premier\s*league|la\s*liga|"
+        r"bundesliga|serie\s*a|ligue\s*1|рпл|eredivisie",
+        competition,
+        re.I,
+    ):
+        return "football"
+    if re.search(r"\batp\b|\bwta\b|wimbledon|roland|open\b", competition, re.I):
+        return "tennis"
     return None
 
 
