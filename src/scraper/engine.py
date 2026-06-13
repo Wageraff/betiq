@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings, setup_logging
@@ -153,7 +154,12 @@ async def _persist_prediction(
         published_at=data.get("published_at"),
     )
     session.add(pred)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        log.warning("Skip %s: duplicate source_url", data.get("source_url"))
+        return False
 
     bets = [
         b

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api_clients.constants import PROVIDER_THE_ODDS_API, sport_for_odds_key
 from src.api_clients.quota_log import get_last_odds_sync, record_odds_sync
 from src.config import settings
-from src.api_clients.external_ids import save_match_external_id
+from src.api_clients.external_ids import delete_match_external_id, save_match_external_id
 from src.api_clients.matching import event_matches_teams
 from src.api_clients.odds import ingest_odds_api_event
 from src.api_clients.odds_keys import odds_sport_keys_for_match
@@ -151,11 +151,32 @@ async def sync_linked_event_odds(
             continue
         try:
             sport_keys = await odds_sport_keys_for_match(session, match)
+            if not sport_keys:
+                continue
+            statuses: list[int | None] = []
+            got_odds = False
             for sport_key in sport_keys:
-                event = await client.get_event_odds(sport_key, event_id)
+                event, status = await client.get_event_odds_with_status(
+                    sport_key, event_id
+                )
+                statuses.append(status)
                 if event and event.get("bookmakers"):
                     total += await ingest_odds_api_event(session, match, event)
+                    got_odds = True
                     break
+            if (
+                not got_odds
+                and statuses
+                and all(s == 404 for s in statuses)
+            ):
+                if await delete_match_external_id(
+                    session, match.id, PROVIDER_THE_ODDS_API
+                ):
+                    log.info(
+                        "Removed stale the_odds_api link match_id=%s event_id=%s",
+                        match.id,
+                        event_id,
+                    )
         except Exception:
             await session.rollback()
             log.exception("Event odds failed match_id=%s", match.id)

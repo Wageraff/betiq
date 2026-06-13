@@ -1,9 +1,11 @@
 """Scheduled jobs для внешних API."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from sqlalchemy import delete, select
 
 from src.api_clients.competitions_sync import sync_leagues_from_api_football
@@ -28,6 +30,15 @@ from src.db.models import ApiQuotaSnapshot, Match, MatchOdds, OddsHistory, Team
 from src.db.session import async_session_factory
 
 log = logging.getLogger("api_jobs")
+
+_TRANSIENT_HTTP_ERRORS = (
+    httpx.RemoteProtocolError,
+    httpx.ReadError,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.WriteError,
+    httpx.PoolTimeout,
+)
 
 
 def _refresh_api_config() -> None:
@@ -158,9 +169,28 @@ async def job_fetch_odds_other() -> None:
 async def job_fetch_post_match_stats() -> None:
     if not settings.api_football_key:
         return
-    async with async_session_factory() as session:
-        n = await sync_post_match_stats(session)
-        log.info("job_fetch_post_match_stats: %s", n)
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with async_session_factory() as session:
+                n = await sync_post_match_stats(session)
+            log.info("job_fetch_post_match_stats: %s", n)
+            return
+        except _TRANSIENT_HTTP_ERRORS as exc:
+            if attempt < max_attempts:
+                delay = 2 ** (attempt - 1)
+                log.warning(
+                    "job_fetch_post_match_stats transient error (attempt %s/%s): %s",
+                    attempt,
+                    max_attempts,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+                continue
+            log.exception(
+                "job_fetch_post_match_stats failed after %s attempts", max_attempts
+            )
+            raise
 
 
 async def job_fetch_injuries() -> None:

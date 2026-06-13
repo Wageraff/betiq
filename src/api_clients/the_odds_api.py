@@ -58,22 +58,29 @@ class TheOddsApiClient:
         if remaining is not None or used is not None:
             await save_quota_snapshot("the_odds_api", remaining, used)
 
-    async def _get_object(
+    async def _get_object_with_status(
         self, path: str, params: dict[str, Any] | None = None
-    ) -> dict | None:
+    ) -> tuple[dict | None, int | None]:
         if not self.enabled:
-            return None
+            return None, None
         p = dict(params or {})
         p["apiKey"] = self.api_key
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(f"{BASE_URL}{path}", params=p)
             if resp.status_code in (404, 422):
                 log.debug("The Odds API %s: %s", resp.status_code, path)
-                return None
+                return None, resp.status_code
             resp.raise_for_status()
             await self._log_quota_headers(resp)
             data = resp.json()
-        return data if isinstance(data, dict) else None
+        payload = data if isinstance(data, dict) else None
+        return payload, resp.status_code
+
+    async def _get_object(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> dict | None:
+        data, _status = await self._get_object_with_status(path, params)
+        return data
 
     async def get_events(self, sport_key: str) -> list[dict]:
         return await self._get(f"/sports/{sport_key}/events")
@@ -104,6 +111,23 @@ class TheOddsApiClient:
         if not mkt.strip():
             return None
         return await self._get_object(
+            f"/sports/{sport_key}/events/{event_id}/odds",
+            {"regions": regions, "markets": mkt, "oddsFormat": "decimal"},
+        )
+
+    async def get_event_odds_with_status(
+        self,
+        sport_key: str,
+        event_id: str,
+        *,
+        regions: str = "eu",
+        markets: str | None = None,
+    ) -> tuple[dict | None, int | None]:
+        """Per-event odds + HTTP status (404 = устаревший event_id)."""
+        mkt = markets or settings.the_odds_api_event_markets
+        if not mkt.strip():
+            return None, None
+        return await self._get_object_with_status(
             f"/sports/{sport_key}/events/{event_id}/odds",
             {"regions": regions, "markets": mkt, "oddsFormat": "decimal"},
         )

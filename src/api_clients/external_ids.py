@@ -78,6 +78,16 @@ async def get_match_external_id(
     return row.external_id if row else None
 
 
+async def delete_match_external_id(
+    session: AsyncSession, match_id: int, provider: str
+) -> bool:
+    row = await session.get(MatchExternalId, (match_id, provider))
+    if not row:
+        return False
+    await session.delete(row)
+    return True
+
+
 async def sync_team_logo_from_api(
     session: AsyncSession, team: Team, logo_url: str | None
 ) -> bool:
