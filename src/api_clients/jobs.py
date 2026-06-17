@@ -114,7 +114,25 @@ async def job_fetch_lineups() -> None:
 
 async def job_fetch_odds(*, force: bool = False) -> None:
     """The Odds API — все виды спорта (db_matches) + API-Football /odds для football."""
+    from src.api_clients.the_odds_api_quota import is_quota_suspended
+
     if not settings.the_odds_api_key and not settings.api_football_odds_enabled:
+        return
+    if settings.the_odds_api_key and not force and is_quota_suspended():
+        log.info("job_fetch_odds: skipped (The Odds API quota suspended)")
+        n_af = 0
+        if settings.api_football_odds_enabled and settings.api_football_key:
+            async with async_session_factory() as session:
+                try:
+                    n_af = await sync_api_football_odds(session)
+                except Exception:
+                    await session.rollback()
+                    log.exception("API-Football odds sync failed")
+        log.info(
+            "job_fetch_odds: the_odds_api=0 api_football=%s force=%s",
+            n_af,
+            force,
+        )
         return
     n_odds = 0
     n_af = 0

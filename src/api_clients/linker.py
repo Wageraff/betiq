@@ -12,7 +12,8 @@ from src.api_clients.constants import (
     PROVIDER_API_FOOTBALL,
     PROVIDER_THE_ODDS_API,
 )
-from src.api_clients.odds_keys import odds_sport_keys_for_match
+from src.api_clients.odds_events_cache import get_events_cached
+from src.api_clients.odds_keys import ODDS_KEY_LABELS, odds_sport_keys_for_match
 from src.api_clients.external_ids import (
     get_team_external_id,
     save_match_external_id,
@@ -21,7 +22,6 @@ from src.api_clients.external_ids import (
 )
 from src.api_clients.fixture_fields import apply_fixture_fields
 from src.api_clients.matching import event_matches_teams
-from src.api_clients.odds_keys import ODDS_KEY_LABELS
 from src.api_clients.the_odds_api import TheOddsApiClient
 from src.db.models import Match
 from src.scraper.utils.normalizer import canonical_competition_name
@@ -143,7 +143,7 @@ async def link_match_to_odds_api(
     cache = events_by_sport if events_by_sport is not None else {}
     for sport_key in sport_keys:
         if sport_key not in cache:
-            cache[sport_key] = await client.get_events(sport_key)
+            cache[sport_key] = await get_events_cached(client, sport_key)
         for event in cache[sport_key]:
             commence = _parse_commence(event.get("commence_time", ""))
             if not commence:

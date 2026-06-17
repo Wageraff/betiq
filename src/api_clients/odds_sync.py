@@ -15,13 +15,18 @@ from src.api_clients.matching import event_matches_teams
 from src.api_clients.odds import ingest_odds_api_event
 from src.api_clients.odds_keys import odds_sport_keys_for_match
 from src.api_clients.odds_scope import (
+    match_odds_recently_fetched,
+    match_within_event_odds_window,
     sport_keys_for_odds_sync,
     upcoming_matches,
 )
 from src.api_clients.the_odds_api import TheOddsApiClient
+from src.api_clients.the_odds_api_quota import is_quota_suspended
 from src.db.models import Match, MatchExternalId
 
 log = logging.getLogger("odds_sync")
+
+EVENT_ODDS_SYNC_KEY = "__per_event_odds__"
 
 
 def _parse_commence(iso: str) -> datetime | None:
@@ -114,9 +119,13 @@ async def sync_linked_event_odds(
     session: AsyncSession,
     *,
     sports: set[str] | None = None,
+    force: bool = False,
 ) -> int:
     """btts / alternate_* — per-event; только football (рынки soccer-specific)."""
     if not settings.the_odds_api_event_markets.strip():
+        return 0
+    if is_quota_suspended():
+        log.debug("Skip event odds sync: quota suspended")
         return 0
     client = TheOddsApiClient()
     if not client.enabled:
@@ -126,12 +135,24 @@ async def sync_linked_event_odds(
     if "football" not in event_sports:
         return 0
 
-    upcoming_ids = {
-        m.id
+    now = datetime.now(timezone.utc)
+    min_interval = settings.odds_min_interval_minutes * 60
+    if not force:
+        last = await get_last_odds_sync(session, EVENT_ODDS_SYNC_KEY)
+        if last and (now - last).total_seconds() < min_interval:
+            log.debug("Skip event odds sync, last=%s", last)
+            return 0
+
+    upcoming = [
+        m
         for m in await upcoming_matches(session, sports={"football"}, for_odds_sync=True)
-    }
+        if match_within_event_odds_window(m)
+    ]
+    upcoming_ids = {m.id for m in upcoming}
     if not upcoming_ids:
+        log.info("Event odds: 0 matches within %sh window", settings.odds_event_hours_ahead)
         return 0
+
     stmt = (
         select(Match, MatchExternalId.external_id)
         .join(MatchExternalId, MatchExternalId.match_id == Match.id)
@@ -146,8 +167,13 @@ async def sync_linked_event_odds(
     rows = (await session.execute(stmt)).all()
 
     total = 0
+    skipped_fresh = 0
+    fetched = 0
     for match, event_id in rows:
         if not event_id:
+            continue
+        if not force and match_odds_recently_fetched(match):
+            skipped_fresh += 1
             continue
         try:
             sport_keys = await odds_sport_keys_for_match(session, match)
@@ -160,9 +186,12 @@ async def sync_linked_event_odds(
                     sport_key, event_id
                 )
                 statuses.append(status)
+                if status in (401, 429):
+                    break
                 if event and event.get("bookmakers"):
                     total += await ingest_odds_api_event(session, match, event)
                     got_odds = True
+                    fetched += 1
                     break
             if (
                 not got_odds
@@ -180,8 +209,22 @@ async def sync_linked_event_odds(
         except Exception:
             await session.rollback()
             log.exception("Event odds failed match_id=%s", match.id)
+
+    if is_quota_suspended():
+        await session.rollback()
+        return 0
+
+    await record_odds_sync(session, EVENT_ODDS_SYNC_KEY)
     await session.commit()
-    log.info("The Odds API event odds: %s lines for %s matches", total, len(rows))
+    log.info(
+        "The Odds API event odds: %s lines, fetched=%s, skipped_fresh=%s, "
+        "candidates=%s (window=%sh)",
+        total,
+        fetched,
+        skipped_fresh,
+        len(rows),
+        settings.odds_event_hours_ahead,
+    )
     return total
 
 
@@ -192,6 +235,10 @@ async def sync_all_odds(
     force: bool = False,
 ) -> int:
     """The Odds API bulk (+ event-odds для football). sports=None → все поддерживаемые."""
+    if is_quota_suspended():
+        log.info("Skip odds sync: The Odds API quota suspended")
+        return 0
+
     keys = await sport_keys_for_odds_sync(session, sports=sports)
     upcoming = await upcoming_matches(session, sports=sports, for_odds_sync=True)
     log.info(
@@ -214,14 +261,17 @@ async def sync_all_odds(
         try:
             n = await sync_odds_for_sport_key(session, key)
             total += n
-            await record_odds_sync(session, key)
-            await session.commit()
+            if not is_quota_suspended():
+                await record_odds_sync(session, key)
+                await session.commit()
         except Exception:
             await session.rollback()
-            log.exception("Odds sync failed for %s", key)
+            if not is_quota_suspended():
+                log.exception("Odds sync failed for %s", key)
     if sports is None or "football" in sports:
         try:
-            total += await sync_linked_event_odds(session, sports=sports)
+            total += await sync_linked_event_odds(session, sports=sports, force=force)
         except Exception:
-            log.exception("Event odds sync failed")
+            if not is_quota_suspended():
+                log.exception("Event odds sync failed")
     return total

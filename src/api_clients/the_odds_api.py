@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from src.api_clients.the_odds_api_quota import is_quota_suspended, note_quota_exhausted
 from src.config import settings
 
 log = logging.getLogger("the_odds_api")
@@ -22,12 +23,15 @@ class TheOddsApiClient:
         return bool(self.api_key)
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> list[dict]:
-        if not self.enabled:
+        if not self.enabled or is_quota_suspended():
             return []
         p = dict(params or {})
         p["apiKey"] = self.api_key
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(f"{BASE_URL}{path}", params=p)
+            if resp.status_code in (401, 429):
+                note_quota_exhausted(resp.status_code)
+                return []
             if resp.status_code == 404:
                 # Лига вне сезона или sport_key неактивен — не ошибка.
                 log.debug("The Odds API 404 (inactive): %s", path)
@@ -61,12 +65,15 @@ class TheOddsApiClient:
     async def _get_object_with_status(
         self, path: str, params: dict[str, Any] | None = None
     ) -> tuple[dict | None, int | None]:
-        if not self.enabled:
+        if not self.enabled or is_quota_suspended():
             return None, None
         p = dict(params or {})
         p["apiKey"] = self.api_key
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(f"{BASE_URL}{path}", params=p)
+            if resp.status_code in (401, 429):
+                note_quota_exhausted(resp.status_code)
+                return None, resp.status_code
             if resp.status_code in (404, 422):
                 log.debug("The Odds API %s: %s", resp.status_code, path)
                 return None, resp.status_code

@@ -160,6 +160,18 @@ class Settings(BaseSettings):
     odds_min_interval_minutes: int = int(
         _api_sync.get("odds_min_interval_minutes", fallback=30)
     )
+    odds_fresh_skip_minutes: int = int(
+        _api_sync.get("odds_fresh_skip_minutes", fallback=30)
+    )
+    odds_event_hours_ahead: int = int(
+        _api_sync.get("odds_event_hours_ahead", fallback=48)
+    )
+    odds_link_events_cache_minutes: int = int(
+        _api_sync.get("odds_link_events_cache_minutes", fallback=60)
+    )
+    odds_quota_cooldown_minutes: int = int(
+        _api_sync.get("odds_quota_cooldown_minutes", fallback=360)
+    )
     api_quota_alert_threshold: int = int(
         _api_sync.get("api_quota_alert_threshold", fallback=100)
     )
@@ -213,6 +225,18 @@ def reload_from_config_ini() -> None:
     )
     s.odds_min_interval_minutes = int(
         _api_sync.get("odds_min_interval_minutes", fallback=30)
+    )
+    s.odds_fresh_skip_minutes = int(
+        _api_sync.get("odds_fresh_skip_minutes", fallback=30)
+    )
+    s.odds_event_hours_ahead = int(
+        _api_sync.get("odds_event_hours_ahead", fallback=48)
+    )
+    s.odds_link_events_cache_minutes = int(
+        _api_sync.get("odds_link_events_cache_minutes", fallback=60)
+    )
+    s.odds_quota_cooldown_minutes = int(
+        _api_sync.get("odds_quota_cooldown_minutes", fallback=360)
     )
     s.api_quota_alert_threshold = int(
         _api_sync.get("api_quota_alert_threshold", fallback=100)

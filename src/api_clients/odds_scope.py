@@ -36,6 +36,34 @@ def is_upcoming_match(match: Match, *, since: datetime, until: datetime) -> bool
     return True
 
 
+def _as_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def match_within_event_odds_window(match: Match) -> bool:
+    """Per-event odds только за N часов до kickoff (см. odds_event_hours_ahead)."""
+    if not match.match_date:
+        return False
+    now = datetime.now(timezone.utc)
+    kickoff = _as_utc(match.match_date)
+    if kickoff <= now:
+        return False
+    horizon = now + timedelta(hours=settings.odds_event_hours_ahead)
+    return kickoff <= horizon
+
+
+def match_odds_recently_fetched(match: Match) -> bool:
+    """Пропуск повторного запроса, если odds_fetched_at свежее odds_fresh_skip_minutes."""
+    if not match.odds_fetched_at:
+        return False
+    age_sec = (
+        datetime.now(timezone.utc) - _as_utc(match.odds_fetched_at)
+    ).total_seconds()
+    return age_sec < settings.odds_fresh_skip_minutes * 60
+
+
 def _competition_sync_clause(sync_field: str):
     col = getattr(Competition, sync_field)
     return or_(Match.competition_id.is_(None), col.is_(True))
